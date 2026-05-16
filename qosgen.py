@@ -129,7 +129,7 @@ def main(dst, calls, signaling, signaling_dscp, noise, duration):
 
     # Noise streams — one per voice call, BE, ports starting at 30000.
     if noise:
-        for i in range(calls):
+        for i in range(calls * 2):
             threads.append(threading.Thread(
                 target=stream_worker,
                 args=(f"noise-{i}", dst, NOISE_PORT_BASE + i, TOS_BE,
