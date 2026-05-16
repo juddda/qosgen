@@ -99,10 +99,12 @@ def stream_worker(
               default="af31", show_default=True,
               help="DSCP marking for the signaling stream.")
 @click.option("--noise", is_flag=True, default=False,
-              help="Add one best-effort noise stream per voice call.")
+              help="Add best-effort noise streams paired with voice calls.")
+@click.option("--noise-multiplier", default=2, show_default=True, type=int,
+              help="Noise streams per voice call (only effective with --noise).")
 @click.option("--duration", type=int, default=None,
               help="Runtime in seconds. Omit to run until Ctrl+C.")
-def main(dst, calls, signaling, signaling_dscp, noise, duration):
+def main(dst, calls, signaling, signaling_dscp, noise, noise_multiplier, duration):
     """Generate marked UDP traffic to exercise router QoS queues."""
     stop_event = threading.Event()
     counter: dict = {}
@@ -127,9 +129,9 @@ def main(dst, calls, signaling, signaling_dscp, noise, duration):
             daemon=True,
         ))
 
-    # Noise streams — two per voice call, BE, ports starting at 30000.
+    # Noise streams — N per voice call, BE, ports starting at 30000.
     if noise:
-        for i in range(calls * 2):
+        for i in range(calls * noise_multiplier):
             threads.append(threading.Thread(
                 target=stream_worker,
                 args=(f"noise-{i}", dst, NOISE_PORT_BASE + i, TOS_BE,
