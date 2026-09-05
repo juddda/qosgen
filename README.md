@@ -6,10 +6,9 @@ Designed to run inside an EVE-NG GUI Linux Docker container connected to virtual
 
 > **Status:** spec-only. See [SPEC.md](SPEC.md) for the full specification. `qosgen.py` not yet implemented.
 >
-> Get Repo
+> Get Repo -- git clone https://github.com/juddda/qosgen.git & then cd qosgen
 >
-> git clone https://github.com/juddda/qosgen.git
-cd qosgen
+> update clone - git pull
 
 
 ## Install
