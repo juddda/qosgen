@@ -1,6 +1,13 @@
 # qosgen — Specification
 
-A Python CLI tool for generating UDP traffic with DSCP markings to test QoS queue behavior on Cisco and Juniper routers.
+A Python CLI tool for generating traffic to test QoS queue behavior on Cisco and Juniper routers.
+
+The tool is a Click group of *pipelines*. Each pipeline is one subcommand backed by one self-contained module — it owns its own constants, socket setup, worker threads, and CLI options:
+
+| Command  | Module      | Purpose                                                        |
+|----------|-------------|----------------------------------------------------------------|
+| `qos`    | `qos.py`    | Marked UDP: voice (EF), signaling (AF31/CS3), noise (BE)        |
+| `stream` | `stream.py` | One unmarked (DSCP 0) UDP or TCP stream from a bound source     |
 
 ## Purpose
 
@@ -14,12 +21,10 @@ Generate marked UDP traffic flows that simulate voice (EF), call signaling (AF31
 - No elevated privileges needed (uses `setsockopt(IP_TOS, ...)` on standard UDP sockets)
 - Pulled into the container via `git clone https://github.com/juddda/qosgen.git`
 
-## CLI
-
-Single Click command:
+## CLI — `qos` pipeline
 
 ```
-python qosgen.py --dst <ip> [options]
+python qosgen.py qos --dst <ip> [options]
 ```
 
 ### Required
@@ -29,10 +34,11 @@ python qosgen.py --dst <ip> [options]
 - `--calls N` — number of voice streams (default: 1)
 - `--signaling` — add one signaling stream (flag, default: off)
 - `--signaling-dscp [af31|cs3]` — DSCP value for signaling (default: `af31`)
-- `--noise` — add one best-effort noise stream per voice call (flag, default: off)
+- `--noise` — add best-effort noise streams paired with voice calls (flag, default: off)
+- `--noise-multiplier N` — noise streams per voice call (default: 2)
 - `--duration SECONDS` — runtime; omit to run until Ctrl+C
 
-## Stream definitions
+## Stream definitions — `qos` pipeline
 
 ### Voice streams
 - DSCP: EF (46), TOS byte = 184
@@ -76,10 +82,10 @@ python qosgen.py --dst <ip> [options]
 - Shutdown via `threading.Event` set by SIGINT handler — Ctrl+C signals all threads to exit cleanly, main thread joins them with a short timeout
 - Final summary printed on exit: total packets sent across all streams
 
-## Behavior example
+## Behavior example — `qos` pipeline
 
 ```
-python qosgen.py --dst 10.0.0.1 --calls 10 --signaling --noise --duration 60
+python qosgen.py qos --dst 10.0.0.1 --calls 10 --signaling --noise --duration 60
 ```
 
 Spawns:
@@ -89,16 +95,88 @@ Spawns:
 
 = 21 threads, ~2.4 Mbps offered load, runs for 60 seconds, prints summary on exit.
 
+## CLI — `stream` pipeline
+
+Generates a single TCP or UDP traffic stream.
+
+```
+python qosgen.py stream \
+  --src-ip <source-ip> \
+  --dst-ip <destination-ip> \
+  --protocol <udp|tcp> \
+  --src-port <source-port> \
+  --dst-port <destination-port> \
+  [--pps <rate>] \
+  [--size <bytes>] \
+  [--duration <seconds>]
+```
+
+### Required
+- `--src-ip IP` — source IPv4 address
+- `--dst-ip IP` — destination IPv4 address
+- `--protocol [udp|tcp]` — transport protocol
+- `--src-port PORT` — source TCP/UDP port
+- `--dst-port PORT` — destination TCP/UDP port
+
+### Options
+- `--pps N` — packets/sends per second (default: 10)
+- `--size BYTES` — payload size (default: 512)
+- `--duration SECONDS` — runtime; omit to run until Ctrl+C
+
+### Traffic
+
+The stream must use the supplied source IP, destination IP, protocol, source port, and
+destination port. The source IP and source port are used **explicitly** — the socket is
+bound with `bind((src_ip, src_port))` rather than letting the kernel choose an address
+and an ephemeral port, because a router's classifier may match on either.
+
+Traffic from this pipeline is always **unmarked: DSCP 0** (TOS byte 0), set explicitly
+with `setsockopt(IPPROTO_IP, IP_TOS, 0)`.
+
+### Protocol notes
+- **UDP** — unconnected socket, `sendto()` per packet. Sends whether or not anything
+  listens; ICMP port-unreachable replies are ignored, since the point of the test is
+  usually what the router does, not what the endpoint does.
+- **TCP** — `connect()` to the destination first, so a listener must exist on
+  `--dst-port` or the run fails with "connection refused". `--pps` becomes sends per
+  second, and `TCP_NODELAY` is set so Nagle's algorithm does not coalesce sends into
+  fewer, larger segments.
+
+### Constraints
+- `--src-ip` must be an address the host owns; the kernel refuses to bind anything else.
+  Forging a foreign source address needs a raw socket and root, which is out of scope.
+- `SO_REUSEADDR` is set so a fixed `--src-port` can be reused by back-to-back runs.
+- Setup failures (address not available, port in use, connection refused, no route) exit
+  non-zero with an explanatory message rather than a bare traceback.
+
+### Behavior example
+
+```
+python qosgen.py stream --src-ip 10.10.10.10 --dst-ip 10.20.20.20 --protocol udp \
+  --src-port 5000 --dst-port 6000 --pps 100 --size 512 --duration 60
+```
+
+One UDP stream, 10.10.10.10:5000 → 10.20.20.20:6000, 100 pps × 512 B (~410 kbps),
+unmarked, for 60 seconds, then prints the packet count.
+
 ## Repository structure
 
 ```
 qosgen/
-├── qosgen.py        # the program (single file, ~200 lines)
+├── qosgen.py        # entry point: the click group, nothing else
+├── qos.py           # qos pipeline — constants, worker, CLI options
+├── stream.py        # stream pipeline — socket setup, worker, CLI options
 ├── requirements.txt # just: click
 ├── README.md        # usage examples + DSCP reference table
 ├── SPEC.md          # this file
+├── lab/             # router configs used to test against
 └── .gitignore       # standard Python
 ```
+
+One module per pipeline: each is readable end-to-end without jumping between files, and
+adding a pipeline means writing one module plus one `add_command()` line in `qosgen.py`.
+Small amounts of duplication between pipelines (e.g. the pacing loop) are accepted as the
+price of that self-containment.
 
 Run with:
 ```
@@ -123,10 +201,10 @@ No `setup.py`, no packaging, no entry points.
 
 Deliberately deferred — easy to add later:
 
-- Configurable noise multiplier (`--noise-multiplier N`)
 - Multiple destination IPs
 - RTP header simulation
-- TCP signaling
+- Marked (non-zero DSCP) streams from the `stream` pipeline
+- Multiple concurrent streams from one `stream` invocation
 - Custom arbitrary DSCP streams (`--custom dscp:pps:size:port`)
 - Per-interface socket binding (`--interface eth1`)
 - Live stats output (current pps, bandwidth) during run
@@ -135,7 +213,7 @@ Deliberately deferred — easy to add later:
 
 ## Design constraints
 
-- Single source file, target ~200 lines
+- One module per pipeline, each self-contained and a few hundred lines at most
 - Rough and ready over polished — working first, polish later
 - Code clarity prioritized for learning purposes (developer is new to network programming, wants to genuinely understand the code)
 - Inline comments should explain *why*, especially around `setsockopt`/TOS, threading model, and the pacing loop
