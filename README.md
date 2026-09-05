@@ -5,6 +5,12 @@ A Python 3.10 single-file CLI that generates marked UDP traffic — voice (EF), 
 Designed to run inside an EVE-NG GUI Linux Docker container connected to virtual Cisco / Juniper routers. No root needed: DSCP is set per-socket via `setsockopt(IP_TOS, ...)` and the kernel stamps the TOS byte on every outbound packet.
 
 > **Status:** spec-only. See [SPEC.md](SPEC.md) for the full specification. `qosgen.py` not yet implemented.
+>
+> Get Repo
+>
+> git clone https://github.com/juddda/qosgen.git
+cd qosgen
+
 
 ## Install
 
