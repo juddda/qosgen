@@ -65,11 +65,14 @@ python qosgen.py qos --dst 10.20.20.10 --calls 2 --signaling --signaling-dscp cs
 On exit it prints what each stream actually sent:
 
 ```
-Total packets sent: 3377
+$ python qosgen.py qos --dst 10.20.20.10 --calls 1 --signaling --noise --duration 20
+Starting 4 stream(s) → 10.20.20.10 for 20s
+
+Total packets sent: 1904
   noise-0: 401
+  noise-1: 401
   signaling: 101
   voice-0: 1001
-  …
 ```
 
 Compare that against the router's class counters — a gap between "sent" and

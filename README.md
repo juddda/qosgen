@@ -89,6 +89,50 @@ python qosgen.py qos --dst <ip> [--calls N] [--signaling] [--signaling-dscp af31
 | Signaling | AF31 / CS3 | 104 / 96 | 5060 (SIP) | 5 pps | 200 B |
 | Noise | BE (0) | 0 | 30000, 30001, 30002 … | 20 pps | 1000 B |
 
+Only `--dst` is required. Every stream goes to that one destination; the kernel picks
+the source address and ephemeral source ports.
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--dst IP` | *required* | Destination for every stream. |
+| `--calls N` | 1 | Number of voice streams. Each gets its own socket, thread, and even destination port. |
+| `--signaling` | off | Adds one signaling stream on port 5060. |
+| `--signaling-dscp af31\|cs3` | `af31` | Marking for that stream. CS3 is the older convention. |
+| `--noise` | off | Adds best-effort streams. Without congestion a QoS policy has nothing to do. |
+| `--noise-multiplier N` | 2 | Noise streams per voice call, so `--calls 5 --noise` gives 10. |
+| `--duration SECONDS` | until Ctrl+C | Runtime. |
+
+```bash
+# One call, nothing else — the simplest check that EF marking is applied.
+python qosgen.py qos --dst 10.20.20.10 --calls 1 --duration 30
+
+# Ten calls plus signaling, no congestion. 11 streams, ~760 kbps.
+python qosgen.py qos --dst 10.20.20.10 --calls 10 --signaling --duration 60
+
+# Ten calls, signaling, and 20 noise streams — 31 streams, ~4.1 Mbps offered.
+python qosgen.py qos --dst 10.20.20.10 --calls 10 --signaling --noise --duration 60
+
+# Heavier congestion without more calls: 5 noise streams per call.
+python qosgen.py qos --dst 10.20.20.10 --calls 4 --noise --noise-multiplier 5 --duration 60
+
+# Legacy CS3 signaling, running until you stop it.
+python qosgen.py qos --dst 10.20.20.10 --calls 2 --signaling --signaling-dscp cs3
+```
+
+On exit it prints what each stream actually sent, which is the number to compare against
+the router's class counters:
+
+```
+$ python qosgen.py qos --dst 10.20.20.10 --calls 1 --signaling --noise --duration 20
+Starting 4 stream(s) → 10.20.20.10 for 20s
+
+Total packets sent: 1904
+  noise-0: 401
+  noise-1: 401
+  signaling: 101
+  voice-0: 1001
+```
+
 Full reference: **[qos.md](qos.md)**.
 
 ### `stream` — one arbitrary stream
