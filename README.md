@@ -203,6 +203,7 @@ lab/
   qos-policy-1mb.cfg  example Cisco hierarchical shaper + queueing policy
   four-sources.sh     launcher: four concurrent streams from four source subnets
 requirements.txt     click
+LICENSE              MIT
 ```
 
 **One module per pipeline.** Each owns everything it needs — constants, socket setup,
@@ -256,6 +257,4 @@ Juniper routers.
 
 ## License
 
-None yet — which under copyright law means all rights reserved, despite the repository
-being public. If you want others to use this, add a `LICENSE` file (MIT is the usual
-choice for a tool like this).
+[MIT](LICENSE) — use it, fork it, ship it, no warranty.
