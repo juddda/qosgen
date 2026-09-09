@@ -215,6 +215,7 @@ lab/
   qos-policy-1mb.cfg  example Cisco hierarchical shaper + queueing policy
   four-sources.sh     launcher: four concurrent streams from four source subnets
   dummy-interfaces.sh create/remove the four source addresses those streams bind
+  custLinux_setup.sh  prepare the user-end Linux host: lab address, listeners, capture
 requirements.txt     click
 LICENSE              MIT
 ```
