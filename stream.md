@@ -155,8 +155,10 @@ exactly like a broken generator.
 ## Running several streams at once
 
 One invocation is one stream. [`lab/four-sources.sh`](lab/four-sources.sh) starts
-four together — one per source subnet, with the source ports the datacentre
-applications use — and stops them all on Ctrl+C:
+four together and stops them all on Ctrl+C. It models traffic flowing **datacentre
+to user**: the generator stands in for the DC application servers, so the app ports
+(TCP 3389/443/8443, UDP 3389) are the *source* ports — which is what the WAN QoS
+ACL matches on — and the destination is a user host consuming those applications:
 
 ```bash
 sudo PYTHON="$(command -v python)" DST_IP=10.248.248.1 ./lab/four-sources.sh

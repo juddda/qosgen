@@ -2,10 +2,27 @@
 #
 # four-sources.sh — fire the four ACL-matching streams at once.
 #
-# Generates traffic from four source addresses (one per /25 in the QoS ACL) with
-# the source ports the datacentre applications use: TCP 3389, TCP 443, TCP 8443
-# and UDP 3389. Every stream is unmarked (DSCP 0) — the point is to capture
-# before and after the WAN router and see the router apply the marking.
+# Direction is datacentre -> user. This host stands in for the DC application
+# servers, so the applications' ports are the SOURCE ports, and the destination
+# is a user consuming those applications across the WAN:
+#
+#   src-ip    an application address, one per /25 in the WAN QoS ACL
+#   src-port  the application port — TCP 3389, TCP 443, TCP 8443, UDP 3389
+#   dst-ip    the user host (DST_IP below)
+#   dst-port  arbitrary — it stands in for the user's ephemeral client port
+#
+# That is why the ACL matches source ports: it classifies the DC-to-user
+# direction, and from the network's point of view the app server is the talker.
+#
+# Path under test: traffic leaves this host unmarked (DSCP 0), reaches the DC
+# perimeter router on its LAN-facing interface, and is marked AF31 there before
+# heading out to the WAN. So the test is a capture either side of that router:
+#
+#   before (LAN side)  ip.dsfield.dscp == 0     tcpdump: tos 0x0
+#   after  (WAN side)  ip.dsfield.dscp == 26    tcpdump: tos 0x68
+#
+# The generator stays unmarked on purpose — every DSCP value you see downstream
+# was put there by the router, not by this host.
 #
 # Run it under sudo:
 #   - source port 443 is privileged, so binding it needs root
@@ -25,16 +42,18 @@
 #   1. A dummy interface per source address, so bind() accepts them:
 #        sudo ./lab/dummy-interfaces.sh up
 #      (/32 per address — a /25 would blackhole the whole block locally)
-#   2. A /32 route on the routers pointing each source back at this host, more
-#      specific than the null routes, so TCP handshakes can complete:
+#   2. A /32 route on the routers pointing each application address back at this
+#      host, more specific than the null routes — the user's TCP ACKs are
+#      addressed to those app addresses, and without a path back the handshake
+#      never completes:
 #        ip route 10.1.1.10 255.255.255.255 <this-host-ens4-ip>
-#   3. A listener on each TCP destination port at the far end:
+#   3. A listener on each TCP destination port, on the user host:
 #        nc -l 6001 > /dev/null      # and 6002, 6003
 #      UDP needs no listener.
 
 set -uo pipefail
 
-DST_IP="${DST_IP:-10.248.248.1}"    # datacentre application host
+DST_IP="${DST_IP:-10.248.248.1}"    # the USER host — traffic is DC -> user
 PPS="${PPS:-10}"                    # packets/sends per second, per stream
 SIZE="${SIZE:-512}"                 # payload bytes per packet
 PYTHON="${PYTHON:-python3}"
