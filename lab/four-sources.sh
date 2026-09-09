@@ -22,11 +22,9 @@
 # Ctrl+C stops all four.
 #
 # Prerequisites on the generator host — see stream.md:
-#   1. A dummy interface per source address (the address must be bindable):
-#        sudo ip link add dummy0 type dummy && sudo ip link set dummy0 up
-#        sudo ip addr add 10.1.1.10/32 dev dummy0        # /32, not /25 — a /25
-#        ...                                             # would blackhole the
-#                                                        # whole block locally
+#   1. A dummy interface per source address, so bind() accepts them:
+#        sudo ./lab/dummy-interfaces.sh up
+#      (/32 per address — a /25 would blackhole the whole block locally)
 #   2. A /32 route on the routers pointing each source back at this host, more
 #      specific than the null routes, so TCP handshakes can complete:
 #        ip route 10.1.1.10 255.255.255.255 <this-host-ens4-ip>

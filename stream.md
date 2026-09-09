@@ -119,6 +119,15 @@ sudo ip addr add 10.1.1.10/32 dev lo
 sudo sysctl -w net.ipv4.ip_nonlocal_bind=1
 ```
 
+[`lab/dummy-interfaces.sh`](lab/dummy-interfaces.sh) does the first of those for the
+four addresses `lab/four-sources.sh` sends from, and can undo it again:
+
+```bash
+sudo ./lab/dummy-interfaces.sh up       # create dummy0-3 with their addresses
+     ./lab/dummy-interfaces.sh status   # what exists right now
+sudo ./lab/dummy-interfaces.sh down     # remove them
+```
+
 Use **`/32`**, not the ACL's real prefix length. The mask never appears in the
 packet — the header carries a bare 32-bit source address, and the router tests it
 against its own wildcard — so a `/32` matches a `/25` ACL entry identically. A
