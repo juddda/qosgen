@@ -146,13 +146,18 @@ Full reference: **[qos.md](qos.md)**.
 
 ```bash
 python qosgen.py stream --src-ip <ip> --dst-ip <ip> --protocol <udp|tcp> \
-                        --src-port <port> --dst-port <port> \
+                        --src-port <port> [--dst-port <port>] \
                         [--pps <rate>] [--size <bytes>] [--duration <seconds>]
 ```
 
-The first five are required; `--pps` defaults to 10 and `--size` to 512. Traffic is
-always unmarked (DSCP 0), the source IP and port are bound explicitly, and TCP needs a
-listener on the far end.
+`--src-ip`, `--dst-ip`, `--protocol` and `--src-port` are required. `--dst-port`
+defaults to a random port in 49152-65535 — the destination is often just whatever
+ephemeral port a client opened, so the interesting port is the source. `--pps` defaults
+to 10 and `--size` to 512.
+
+Traffic is always unmarked (DSCP 0), the source IP and port are bound explicitly, and
+TCP needs a listener on the far end — so pin `--dst-port` when using TCP, rather than
+letting it pick a port nothing is listening on.
 
 Full reference: **[stream.md](stream.md)** — including how to source traffic from
 addresses this host doesn't own, which is what you need when a QoS ACL matches subnets

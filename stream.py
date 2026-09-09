@@ -21,6 +21,7 @@ Three things make this pipeline different from qos.py:
 """
 
 import errno
+import random
 import signal
 import socket
 import threading
@@ -33,6 +34,13 @@ TOS_UNMARKED = 0
 
 DEFAULT_PPS   = 10    # gentle by default — pass --pps to offer real load
 DEFAULT_BYTES = 512
+
+# IANA dynamic/private range. When --dst-port is omitted we pick from here, because
+# this pipeline usually models a server talking *to* a user: the interesting port is
+# the source (the application), and the destination is just whatever ephemeral port
+# the client happened to open. Windows clients allocate from exactly this range.
+EPHEMERAL_LOW  = 49152
+EPHEMERAL_HIGH = 65535
 
 
 def open_stream_socket(src_ip: str, src_port: int, dst_ip: str,
@@ -155,8 +163,9 @@ def stream_worker(src_ip, src_port, dst_ip, dst_port, protocol, pps,
               help="Transport protocol.")
 @click.option("--src-port", required=True, type=click.IntRange(1, 65535),
               help="Source port.")
-@click.option("--dst-port", required=True, type=click.IntRange(1, 65535),
-              help="Destination port.")
+@click.option("--dst-port", default=None, type=click.IntRange(1, 65535),
+              help="Destination port. Omit for a random port in "
+                   f"{EPHEMERAL_LOW}-{EPHEMERAL_HIGH}.")
 @click.option("--pps", default=DEFAULT_PPS, show_default=True,
               type=click.IntRange(min=1),
               help="Packets/sec (UDP) or sends/sec (TCP).")
@@ -167,6 +176,13 @@ def stream_worker(src_ip, src_port, dst_ip, dst_port, protocol, pps,
               help="Runtime in seconds. Omit to run until Ctrl+C.")
 def stream_pipeline(src_ip, dst_ip, protocol, src_port, dst_port, pps, size, duration):
     """Generate one unmarked (DSCP 0) UDP or TCP stream."""
+
+    # An omitted --dst-port stands in for a client's ephemeral port, so any high
+    # port will do. Chosen here rather than in the worker so the value is known
+    # up front: it goes in the banner, and TCP needs a listener on it.
+    random_dst_port = dst_port is None
+    if random_dst_port:
+        dst_port = random.randint(EPHEMERAL_LOW, EPHEMERAL_HIGH)
 
     stop_event = threading.Event()
     result: dict = {"sent": 0, "error": None}
@@ -184,8 +200,9 @@ def stream_pipeline(src_ip, dst_ip, protocol, src_port, dst_port, pps, size, dur
     signal.signal(signal.SIGINT, lambda signum, frame: stop_event.set())
 
     offered_bps = pps * size * 8
-    click.echo(f"Starting {protocol} stream {src_ip}:{src_port} → {dst_ip}:{dst_port}, "
-               f"{pps} pps × {size} B (~{offered_bps / 1000:.1f} kbps payload)"
+    click.echo(f"Starting {protocol} stream {src_ip}:{src_port} → {dst_ip}:{dst_port}"
+               + (" (random)" if random_dst_port else "")
+               + f", {pps} pps × {size} B (~{offered_bps / 1000:.1f} kbps payload)"
                + (f" for {duration}s" if duration else " (Ctrl+C to stop)"))
 
     worker.start()

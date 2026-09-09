@@ -105,7 +105,7 @@ python qosgen.py stream \
   --dst-ip <destination-ip> \
   --protocol <udp|tcp> \
   --src-port <source-port> \
-  --dst-port <destination-port> \
+  [--dst-port <destination-port>] \
   [--pps <rate>] \
   [--size <bytes>] \
   [--duration <seconds>]
@@ -116,9 +116,11 @@ python qosgen.py stream \
 - `--dst-ip IP` — destination IPv4 address
 - `--protocol [udp|tcp]` — transport protocol
 - `--src-port PORT` — source TCP/UDP port
-- `--dst-port PORT` — destination TCP/UDP port
 
 ### Options
+- `--dst-port PORT` — destination TCP/UDP port. Omitted, a random port in the IANA
+  dynamic range 49152-65535 is chosen and reported, standing in for a client's
+  ephemeral port. TCP needs a listener on the port, so pin it there.
 - `--pps N` — packets/sends per second (default: 10)
 - `--size BYTES` — payload size (default: 512)
 - `--duration SECONDS` — runtime; omit to run until Ctrl+C

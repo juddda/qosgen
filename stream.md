@@ -15,7 +15,7 @@ python qosgen.py stream \
   --dst-ip   <destination-ip>   # required
   --protocol <udp|tcp>          # required
   --src-port <1-65535>          # required
-  --dst-port <1-65535>          # required
+  [--dst-port <1-65535>]        # optional, default = random 49152-65535
   [--pps      <rate>]           # optional, default 10
   [--size     <bytes>]          # optional, default 512, max 65507
   [--duration <seconds>]        # optional, omit = run until Ctrl+C
@@ -27,7 +27,7 @@ python qosgen.py stream \
 | `--dst-ip` | Where the traffic goes. Routing decides which interface it leaves by. |
 | `--protocol` | `udp` = fire-and-forget datagrams. `tcp` = handshake first, so something must be listening. |
 | `--src-port` | Pinned, not random. Routers often classify on source port, so it has to be yours to choose. |
-| `--dst-port` | Destination port in the header. |
+| `--dst-port` | Destination port in the header. Omit it and a random port in 49152-65535 (the IANA dynamic range) is chosen and printed — useful when this pipeline models a server talking *to* a user, where the destination is just whatever ephemeral port the client opened. **Pin it for TCP**, which needs a listener on that exact port. |
 | `--pps` | Packets per second (UDP) or `send()` calls per second (TCP). |
 | `--size` | Payload bytes per packet — zero-filled. Offered rate = `pps × size × 8` bits/s. |
 | `--duration` | Seconds to run. Omitted, it runs until Ctrl+C. |
@@ -46,6 +46,11 @@ python qosgen.py stream --src-ip 10.10.10.10 --dst-ip 10.20.20.20 \
 # UDP until you stop it
 python qosgen.py stream --src-ip 10.10.10.10 --dst-ip 10.20.20.20 \
   --protocol udp --src-port 5000 --dst-port 6000
+
+# Destination port omitted — a random 49152-65535 port stands in for the
+# user's ephemeral client port, and is printed in the banner.
+python qosgen.py stream --src-ip 10.10.10.10 --dst-ip 10.20.20.20 \
+  --protocol udp --src-port 3389
 ```
 
 ## What it does, step by step
