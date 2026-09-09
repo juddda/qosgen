@@ -212,7 +212,7 @@ qos.md               qos reference
 stream.md            stream reference
 SPEC.md              the specification both pipelines are built to
 lab/
-  qos-lab-test_README.md   how to run a lab test with these scripts, in order
+  streaming-lab-setup_README.md  how to run a lab test with these scripts, in order
   qos-policy-1mb.cfg  example Cisco hierarchical shaper + queueing policy
   four-sources.sh     launcher: four concurrent streams from four source subnets
   dummy-interfaces.sh create/remove the four source addresses those streams bind

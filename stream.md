@@ -170,7 +170,7 @@ sudo PYTHON="$(command -v python)" DST_IP=10.248.248.1 ./lab/four-sources.sh
 ```
 
 Edit the `STREAMS` array in that file to match your addresses and ports;
-[`lab/qos-lab-test_README.md`](lab/qos-lab-test_README.md) walks the whole
+[`lab/streaming-lab-setup_README.md`](lab/streaming-lab-setup_README.md) walks the whole
 test in order, naming which node runs which step. Two
 reasons it wants `sudo`: source ports below 1024 (443) are privileged, and an
 unprivileged shell can't signal a root process, so a mixed process group won't
