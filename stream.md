@@ -169,7 +169,9 @@ ACL matches on — and the destination is a user host consuming those applicatio
 sudo PYTHON="$(command -v python)" DST_IP=10.248.248.1 ./lab/four-sources.sh
 ```
 
-Edit the `STREAMS` array in that file to match your addresses and ports. Two
+Edit the `STREAMS` array in that file to match your addresses and ports;
+[`lab/qos-lab-test_README.md`](lab/qos-lab-test_README.md) walks the whole
+test in order, naming which node runs which step. Two
 reasons it wants `sudo`: source ports below 1024 (443) are privileged, and an
 unprivileged shell can't signal a root process, so a mixed process group won't
 die on one Ctrl+C. `PYTHON` is passed explicitly because sudo resets PATH to
