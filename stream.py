@@ -87,6 +87,9 @@ def explain_setup_error(exc: OSError, src_ip: str, src_port: int,
     if exc.errno == errno.EADDRINUSE:
         return (f"source port {src_port} is already in use on {src_ip}. Pick another "
                 f"--src-port, or wait for the previous run's socket to clear.")
+    if exc.errno in (errno.EACCES, errno.EPERM):
+        return (f"not allowed to bind source port {src_port}. Ports below 1024 are "
+                f"privileged — re-run under sudo, or pick a --src-port above 1023.")
     if exc.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH):
         return f"no route from {src_ip} to {dst_ip}. Check the interface and routing table."
     return str(exc)

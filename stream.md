@@ -101,6 +101,63 @@ next check, closes the socket, and reports its count:
 Setup failures (source IP not local, port in use, connection refused, no route) exit
 non-zero with a plain-English explanation instead of a traceback.
 
+## Sourcing from an address this host doesn't own
+
+A router's QoS ACL usually matches source addresses from subnets the generator
+isn't in. Three ways to satisfy `bind()` without a real NIC in that subnet:
+
+```bash
+# 1. dummy interface — the address is local, on no physical NIC.
+sudo ip link add dummy0 type dummy && sudo ip link set dummy0 up
+sudo ip addr add 10.1.1.10/32 dev dummy0
+
+# 2. loopback alias — same idea, less tidy to clean up.
+sudo ip addr add 10.1.1.10/32 dev lo
+
+# 3. no interface at all — let the kernel bind non-local addresses.
+sudo sysctl -w net.ipv4.ip_nonlocal_bind=1
+```
+
+Use **`/32`**, not the ACL's real prefix length. The mask never appears in the
+packet — the header carries a bare 32-bit source address, and the router tests it
+against its own wildcard — so a `/32` matches a `/25` ACL entry identically. A
+`/25` would additionally create a connected route for all 128 addresses pointing
+at the dummy, quietly blackholing anything you later send toward that block.
+
+Either way the packets still leave via the interface that routes to the
+destination; the bind only decides what goes in the source field.
+
+**TCP needs the reply to come back.** The far end's SYN-ACK is addressed to your
+made-up source, so the routers need a path to it — a host route more specific
+than any null route covering the block:
+
+```
+ip route 10.1.1.10 255.255.255.255 <generator-host-ip>
+```
+
+Without that, the handshake never completes and only SYN retransmissions leave
+the host. UDP is one-way and doesn't care.
+
+Watch for **uRPF** on the router's ingress interface too — strict reverse-path
+forwarding drops traffic whose source it can't route back toward, which looks
+exactly like a broken generator.
+
+## Running several streams at once
+
+One invocation is one stream. [`lab/four-sources.sh`](lab/four-sources.sh) starts
+four together — one per source subnet, with the source ports the datacentre
+applications use — and stops them all on Ctrl+C:
+
+```bash
+sudo PYTHON="$(command -v python)" DST_IP=10.248.248.1 ./lab/four-sources.sh
+```
+
+Edit the `STREAMS` array in that file to match your addresses and ports. Two
+reasons it wants `sudo`: source ports below 1024 (443) are privileged, and an
+unprivileged shell can't signal a root process, so a mixed process group won't
+die on one Ctrl+C. `PYTHON` is passed explicitly because sudo resets PATH to
+root's, where the conda env's interpreter — and click — isn't found.
+
 ## Confirming it on the wire
 
 ```bash
