@@ -42,9 +42,16 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+To update an existing clone:
+
+```bash
+cd qosgen
+git pull
+```
+
 There is no packaging step, no `setup.py`, and no entry point to install — clone it and
-run `python qosgen.py`. That is deliberate: on a lab host you want `git pull` to be the
-entire upgrade process.
+run `python qosgen.py`. That is deliberate: on a lab host `git pull` is the entire
+upgrade process.
 
 ## Quick start
 
