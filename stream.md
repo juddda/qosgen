@@ -4,7 +4,8 @@ The `stream` pipeline (`stream.py`) generates a single TCP or UDP traffic stream
 explicitly bound source socket, unmarked at **DSCP 0**. It's the counterpart to the `qos`
 pipeline: the traffic a policy should *not* prioritize.
 
-See [README.md](README.md) for the tool as a whole.
+See [README.md](README.md) for the tool as a whole, and [qos.md](qos.md) for the
+other pipeline.
 
 ## CLI syntax
 

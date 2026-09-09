@@ -1,27 +1,80 @@
 # qosgen
 
-A small Python 3.10 CLI that generates traffic for exercising router QoS policies — marked voice/signaling/noise streams, or a single arbitrary stream with an explicit source socket.
+A traffic generator for testing router QoS policies. It sends UDP or TCP streams with
+whatever DSCP marking, rate, size, and 5-tuple you specify, so you can watch a router
+classify, queue, police, or re-mark them.
 
-Designed to run inside an EVE-NG GUI Linux Docker container connected to virtual Cisco / Juniper routers. No root needed: DSCP is set per-socket via `setsockopt(IP_TOS, ...)` and the kernel stamps the TOS byte on every outbound packet.
+Built for lab work — EVE-NG, GNS3, or any pair of hosts either side of a router under
+test. It is a single-purpose tool: it generates traffic and counts what it sent. It does
+not measure latency, jitter, or loss (use iperf3 or a hardware tester for that), and it
+does not receive traffic. What it gives you is **precise control over what leaves the
+host**, which is exactly what you need when the question is "does my QoS policy do what
+I think it does?"
+
+Two pipelines, one subcommand each:
+
+| Command | Reference | What it generates |
+|---|---|---|
+| **`qos`** | [qos.md](qos.md) | Marked UDP: voice (EF), call signaling (AF31/CS3), best-effort noise. Simulates a branch office under congestion. |
+| **`stream`** | [stream.md](stream.md) | One unmarked (DSCP 0) UDP **or** TCP stream from an explicitly bound source IP and port. For testing what a router *does* to traffic — classification, marking, policing. |
+
+## Requirements
+
+- **Python 3.10 or newer**
+- **[click](https://click.palletsprojects.com/)** — the only dependency
+- **Linux** for the full feature set. It runs on macOS and BSD, but the dummy-interface
+  and non-local-bind techniques in [stream.md](stream.md) are Linux-specific.
+- **No root**, with two exceptions: binding a source port below 1024, and creating
+  dummy interfaces. Setting DSCP on your own outbound packets is unprivileged.
 
 ## Install
 
 ```bash
+git clone https://github.com/juddda/qosgen.git
+cd qosgen
 pip install -r requirements.txt
 ```
 
-## Pipelines
+A virtual environment keeps it isolated:
 
-Each pipeline is one subcommand, and lives in one self-contained module:
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-| Command  | Module      | Traffic                                                        |
-|----------|-------------|----------------------------------------------------------------|
-| `qos`    | `qos.py`    | Marked UDP: voice (EF), signaling (AF31/CS3), noise (BE)        |
-| `stream` | `stream.py` | One unmarked (DSCP 0) UDP **or** TCP stream from a bound source |
+There is no packaging step, no `setup.py`, and no entry point to install — clone it and
+run `python qosgen.py`. That is deliberate: on a lab host you want `git pull` to be the
+entire upgrade process.
+
+## Quick start
+
+Send 100 unmarked UDP packets per second, from a specific source socket, for 30 seconds:
+
+```bash
+python qosgen.py stream \
+  --src-ip 10.10.10.10 --dst-ip 10.20.20.10 \
+  --protocol udp --src-port 5000 --dst-port 6000 \
+  --pps 100 --size 512 --duration 30
+```
+
+Simulate ten voice calls with signaling and congestion:
+
+```bash
+python qosgen.py qos --dst 10.20.20.10 --calls 10 --signaling --noise --duration 60
+```
+
+Every command self-documents:
 
 ```bash
 python qosgen.py --help
+python qosgen.py stream --help
+python qosgen.py qos --help
 ```
+
+Omit `--duration` in either pipeline to run until Ctrl+C. Both print a per-stream packet
+count on exit.
+
+## The two pipelines
 
 ### `qos` — marked voice scenario
 
@@ -30,23 +83,15 @@ python qosgen.py qos --dst <ip> [--calls N] [--signaling] [--signaling-dscp af31
                      [--noise] [--noise-multiplier N] [--duration SECONDS]
 ```
 
-Example — 10 voice calls + signaling + noise for 60 seconds:
+| Stream | DSCP | TOS | Port(s) | Rate | Payload |
+|---|---|---|---|---|---|
+| Voice | EF (46) | 184 | 16384, 16386, 16388 … | 50 pps | 160 B |
+| Signaling | AF31 / CS3 | 104 / 96 | 5060 (SIP) | 5 pps | 200 B |
+| Noise | BE (0) | 0 | 30000, 30001, 30002 … | 20 pps | 1000 B |
 
-```bash
-python qosgen.py qos --dst 10.0.0.1 --calls 10 --signaling --noise --duration 60
-```
-
-That's 31 concurrent UDP streams at the default noise multiplier of 2.
-
-| Stream    | DSCP       | TOS      | Port(s)                | Rate    | Payload |
-|-----------|------------|----------|------------------------|---------|---------|
-| Voice     | EF (46)    | 184      | 16384, 16386, 16388 …  | 50 pps  | 160 B   |
-| Signaling | AF31 / CS3 | 104 / 96 | 5060 (SIP)             | ~5 pps  | 200 B   |
-| Noise     | BE (0)     | 0        | 30000, 30001, 30002 …  | 20 pps  | 1000 B  |
+Full reference: **[qos.md](qos.md)**.
 
 ### `stream` — one arbitrary stream
-
-Full reference: **[stream.md](stream.md)**.
 
 ```bash
 python qosgen.py stream --src-ip <ip> --dst-ip <ip> --protocol <udp|tcp> \
@@ -54,50 +99,119 @@ python qosgen.py stream --src-ip <ip> --dst-ip <ip> --protocol <udp|tcp> \
                         [--pps <rate>] [--size <bytes>] [--duration <seconds>]
 ```
 
-Example:
+The first five are required; `--pps` defaults to 10 and `--size` to 512. Traffic is
+always unmarked (DSCP 0), the source IP and port are bound explicitly, and TCP needs a
+listener on the far end.
+
+Full reference: **[stream.md](stream.md)** — including how to source traffic from
+addresses this host doesn't own, which is what you need when a QoS ACL matches subnets
+your generator isn't in.
+
+## Verifying the marking
+
+The tool reports what it *sent*. Proving what *arrived*, and what the router did to it,
+takes a capture:
 
 ```bash
-python qosgen.py stream --src-ip 10.10.10.10 --dst-ip 10.20.20.20 --protocol udp \
-                        --src-port 5000 --dst-port 6000 --pps 100 --size 512 --duration 60
+# on the receiving host
+sudo tcpdump -v -n -i <iface> 'host <generator-ip>'
 ```
 
-- `--src-ip`, `--dst-ip`, `--protocol`, `--src-port`, `--dst-port` are required; `--pps` (default 10), `--size` (default 512), and `--duration` are optional. Omit `--duration` to run until Ctrl+C.
-- Traffic is always **unmarked — DSCP 0**, so it lands in the default class. That makes it the counterpart to `qos`: the stream a policy should *not* prioritize.
-- `--src-ip` must be an address this host actually owns. The kernel refuses to bind anything else, and forging a foreign source address would require a raw socket and root — deliberately out of scope.
-- `--protocol tcp` needs something listening on `--dst-port` (e.g. `nc -l 6000`) or the connection is refused. UDP sends regardless.
-- For TCP, `--pps` means *sends* per second. Nagle is disabled (`TCP_NODELAY`) so each send goes out on its own rather than being coalesced.
+The verbose output shows the TOS byte: `tos 0xb8` (EF), `0x68` (AF31), `0x60` (CS3),
+`0x0` (unmarked). In Wireshark, look at **Differentiated Services Field** in the IP
+header, or filter with `ip.dsfield.dscp == 46`.
 
-## Verifying
+Capturing on both sides of the router is the useful trick: send unmarked with `stream`,
+capture before and after, and the DSCP change proves the router's policy is marking.
 
-1. Capture on the receiver: `tcpdump -v -n -i <iface> udp` — confirm the TOS byte arrives intact (e.g. `tos 0xb8` for EF, `tos 0x0` for `stream`).
-2. On the router under test, watch the queue counters:
-   - Cisco: `show policy-map interface <int>`
-   - Juniper: `show class-of-service interface <int>`
-
-## Layout
+On the router itself:
 
 ```
-qosgen.py   # entry point: the click group, nothing else
-qos.py      # the qos pipeline — constants, worker, CLI options
-stream.py   # the stream pipeline — socket setup, worker, CLI options
-lab/        # router configs used to test against
+show policy-map interface <interface>          # Cisco IOS / IOS-XE
+show class-of-service interface <interface>    # Juniper
 ```
 
-Each pipeline module owns everything it needs, so you can read one end-to-end without jumping between files. Adding a pipeline = one new module + one `add_command()` line in `qosgen.py`.
+## Troubleshooting
 
-## Design notes
+| Message or symptom | Cause and fix |
+|---|---|
+| `--src-ip X is not an address on this host` | `bind()` only accepts addresses the kernel owns. Add a dummy interface, or set `net.ipv4.ip_nonlocal_bind=1` — see [stream.md](stream.md#sourcing-from-an-address-this-host-doesnt-own). |
+| `not allowed to bind source port N` | Ports below 1024 are privileged. Run under `sudo`, or choose a source port above 1023. |
+| `nothing is listening on IP:PORT` | TCP needs a peer to complete the handshake. Start `nc -l <port>` at the far end, or use `--protocol udp`, which needs no listener. |
+| `source port N is already in use` | Another process — often a previous run still in `TIME_WAIT`. Pick another `--src-port` or wait. |
+| `no route from X to Y` | The host has no path to the destination. Check `ip route` and the interface state. |
+| `ModuleNotFoundError: No module named 'click'` | Wrong interpreter. Common under `sudo`, which resets `PATH` to root's and misses your venv or conda env: `sudo PYTHON="$(command -v python)" …`. |
+| Packets sent, nothing arrives | Check a firewall on either host, the routing in both directions, and **uRPF** on the router's ingress interface — strict reverse-path forwarding silently drops traffic whose source it can't route back toward. |
+| Router shows no packets in the expected class | The ACL may not match. Confirm it keys on the protocol you're sending (a `permit tcp … eq 443` entry ignores UDP on port 443) and on the right direction. |
+| Packet count at the receiver doesn't match | `--size` above 1472 fragments on a 1500-byte MTU, so one send becomes several packets. Keep UDP payloads at or below 1472. |
+| TCP sends fewer, larger packets than expected | Shouldn't happen — `TCP_NODELAY` is set. If you see it, something downstream is coalescing (GSO/GRO offload on the NIC). Check `ethtool -k <iface>`. |
 
-- **One socket per stream.** `IP_TOS` is a per-socket option, so streams with different DSCPs can't share a socket.
-- **One thread per stream**, all spawned from the pipeline's command. Work is sleep-bound, not CPU-bound.
-- **Drift-free pacing** via absolute scheduled times with `time.perf_counter()`; `threading.Event.wait(...)` instead of `time.sleep(...)` keeps Ctrl+C responsive.
-- **`qos` doesn't bind, `stream` does.** Left alone, the kernel picks the source IP and a random ephemeral source port. `stream` calls `bind((src_ip, src_port))` to pin both, so the 5-tuple on the wire is exactly the one a router's classifier will match on.
-- TOS = DSCP shifted left by 2 bits (lower 2 bits are ECN).
+## Repository layout
+
+```
+qosgen.py            entry point — the Click group, nothing else
+qos.py               the qos pipeline: constants, worker, CLI options
+stream.py            the stream pipeline: socket setup, worker, CLI options
+qos.md               qos reference
+stream.md            stream reference
+SPEC.md              the specification both pipelines are built to
+lab/
+  qos-policy-1mb.cfg  example Cisco hierarchical shaper + queueing policy
+  four-sources.sh     launcher: four concurrent streams from four source subnets
+requirements.txt     click
+```
+
+**One module per pipeline.** Each owns everything it needs — constants, socket setup,
+worker threads, CLI options — so you can read one end to end without jumping between
+files. Adding a pipeline means writing one module and adding one `add_command()` line to
+`qosgen.py`. Small duplication between pipelines is the accepted price of that.
+
+## How it works
+
+- **DSCP is set per socket** with `setsockopt(IPPROTO_IP, IP_TOS, value)`. The kernel
+  writes that byte into the IP header of every packet leaving the socket. Because it is a
+  *per-socket* option, streams with different markings cannot share a socket — hence one
+  socket per stream.
+- **TOS = DSCP << 2.** The low two bits are ECN and stay zero, so DSCP 46 (EF) is TOS 184.
+- **One thread per stream.** The work is sleep-bound, not CPU-bound, so the GIL doesn't
+  matter and dozens of threads are cheap.
+- **Pacing uses absolute scheduled times** from `time.perf_counter()`, so the rate doesn't
+  drift as send costs accumulate.
+- **Shutdown is a `threading.Event`.** Sleeps go through `event.wait()`, so Ctrl+C stops
+  every stream within milliseconds instead of each waiting out its sleep.
 
 ## DSCP reference
 
-| Marking      | DSCP | TOS | Use                             |
-|--------------|------|-----|---------------------------------|
-| Default / BE | 0    | 0   | Best effort, noise, `stream`    |
-| CS3          | 24   | 96  | Legacy signaling marking        |
-| AF31         | 26   | 104 | Modern call signaling           |
-| EF           | 46   | 184 | Voice bearer (RTP)              |
+| Marking | DSCP | Binary | TOS byte | Typical use |
+|---|---|---|---|---|
+| Default / BE | 0 | 000000 | 0 | Best effort, noise, `stream` traffic |
+| CS1 | 8 | 001000 | 32 | Scavenger / bulk |
+| AF21 | 18 | 010010 | 72 | Transactional data |
+| CS3 | 24 | 011000 | 96 | Legacy call signaling |
+| AF31 | 26 | 011010 | 104 | Modern call signaling |
+| CS4 | 32 | 100000 | 128 | Realtime interactive / video |
+| AF41 | 34 | 100010 | 136 | Interactive video |
+| EF | 46 | 101110 | 184 | Voice bearer (RTP) |
+| CS6 | 48 | 110000 | 192 | Network control (routing protocols) |
+
+## Notes for EVE-NG
+
+The tool was written to run on Linux nodes inside EVE-NG, wired to virtual Cisco or
+Juniper routers.
+
+- No special Docker flags or `--network host` are needed; EVE-NG handles node networking.
+- A second NIC on a Linux node stays `NO-CARRIER` until you draw the link on the canvas.
+  Netplan will not configure an interface with no carrier, so the address silently never
+  appears. Adding or rewiring an interface usually requires stopping the node.
+- Give the lab-facing interface a static address and **no default route** — leave the
+  default on the management interface so the node keeps its internet access. Point
+  specific prefixes at the lab router instead.
+- `lab/qos-policy-1mb.cfg` is a working example: a 1 Mbps hierarchical shaper with EF
+  priority, per-class bandwidth ratios, and WRED, scaled down from a production MPLS
+  WAN policy.
+
+## License
+
+None yet — which under copyright law means all rights reserved, despite the repository
+being public. If you want others to use this, add a `LICENSE` file (MIT is the usual
+choice for a tool like this).

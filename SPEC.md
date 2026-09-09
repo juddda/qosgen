@@ -166,10 +166,14 @@ qosgen/
 ├── qosgen.py        # entry point: the click group, nothing else
 ├── qos.py           # qos pipeline — constants, worker, CLI options
 ├── stream.py        # stream pipeline — socket setup, worker, CLI options
+├── qos.md           # qos reference
+├── stream.md        # stream reference
 ├── requirements.txt # just: click
-├── README.md        # usage examples + DSCP reference table
+├── README.md        # install, quick start, troubleshooting, DSCP reference
 ├── SPEC.md          # this file
-├── lab/             # router configs used to test against
+├── lab/
+│   ├── qos-policy-1mb.cfg   # example Cisco shaper + queueing policy
+│   └── four-sources.sh      # launcher: four concurrent streams
 └── .gitignore       # standard Python
 ```
 
