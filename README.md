@@ -214,7 +214,7 @@ SPEC.md              the specification both pipelines are built to
 lab/
   streaming-lab-setup_README.md  how to run a lab test with these scripts, in order
   qos-policy-1mb.cfg  example Cisco hierarchical shaper + queueing policy
-  customer-streams.sh launcher: every customer subnet × every application port
+  customer-streams.sh launcher: every customer subnet × every application port (15)
   dummy-interfaces.sh create/remove the source addresses those streams bind
   custLinux_setup.sh  prepare the user-end Linux host: lab address, listeners, capture
 requirements.txt     click

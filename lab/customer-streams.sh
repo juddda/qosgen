@@ -7,7 +7,7 @@
 # is a user host consuming those applications across the WAN:
 #
 #   src-ip    one address per customer /25 in the WAN QoS ACL
-#   src-port  the application port — TCP 3389, TCP 443, TCP 8443, UDP 3389
+#   src-port  the application port — TCP 80, 443, 3389, 8443 and UDP 3389
 #   dst-ip    the user host (DST_IP below)
 #   dst-port  one per application port, so captures are easy to tell apart
 #
@@ -21,7 +21,7 @@
 #
 # Pick one with SITE:  sudo SITE=east ./lab/customer-streams.sh
 #
-# Each site's subnets × 4 application ports = 12 concurrent streams, covering
+# Each site's 3 subnets × 5 application ports = 15 concurrent streams, covering
 # that site's ACL lines in a single run. Each stream reports its own packet
 # count on exit, so a combination that isn't matching shows up as an outlier.
 #
@@ -36,7 +36,7 @@
 # was put there by the router, not by this host.
 #
 # Run it under sudo:
-#   - source port 443 is privileged, so binding it needs root
+#   - source ports 80 and 443 are privileged, so binding them needs root
 #   - a mixed root/non-root process group can't be stopped by one Ctrl+C: an
 #     unprivileged shell isn't allowed to signal a root process, so those
 #     streams would survive and keep sending
@@ -49,7 +49,7 @@
 #
 #   sudo PYTHON="$(command -v python)" ./lab/customer-streams.sh
 #
-# Ctrl+C stops all 24.
+# Ctrl+C stops all 15.
 #
 # Prerequisites — see ../stream.md and streaming-lab-setup_README.md:
 #   1. A dummy interface per source address, so bind() accepts them:
@@ -61,7 +61,7 @@
 #      addressed to those source addresses, and without a path back the
 #      handshake never completes:
 #        ip route 10.248.76.138 255.255.255.255 <this-host-lab-ip>
-#   3. Listeners on the user host for the TCP destination ports:
+#   3. Listeners on the user host for the four TCP destination ports:
 #        ./lab/custLinux_setup.sh listeners
 #      UDP needs no listener.
 
@@ -97,13 +97,14 @@ case "$SITE" in
 esac
 
 # One line per application: protocol, source port, destination port.
-# Distinct destination ports keep the four applications separable in a capture
-# even though every stream shares a source subnet with three others.
+# Distinct destination ports keep the five applications separable in a capture
+# even though every stream shares a source subnet with four others.
 APPS=(
   "tcp  3389  6001"    # RDP
   "tcp   443  6002"    # HTTPS
   "tcp  8443  6003"    # HTTPS-alt
   "udp  3389  6004"    # RDP over UDP
+  "tcp    80  6005"    # HTTP
 )
 
 cd "$(dirname "$0")/.." || exit 1   # repo root, so qosgen.py resolves
@@ -117,7 +118,7 @@ if ! "$PYTHON" -c 'import click' > /dev/null 2>&1; then
 fi
 
 if [ "$(id -u)" -ne 0 ]; then
-  echo "warning: not running as root — the source port 443 streams will fail," >&2
+  echo "warning: not running as root — the port 80 and 443 streams will fail," >&2
   echo "         and Ctrl+C will not stop any stream started by sudo." >&2
 fi
 

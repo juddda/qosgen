@@ -3,8 +3,8 @@
 Everything here supports one test: traffic leaves the generator unmarked, crosses the
 perimeter router, and should come out the other side marked **AF31** (DSCP 26,
 `tos 0x68`). Direction is **application → user**, which is why the application ports
-(TCP 3389, 443, 8443 and UDP 3389) are *source* ports — that is what the WAN QoS ACL
-matches on.
+(TCP 80, 443, 3389, 8443 and UDP 3389) are *source* ports — that is what the WAN QoS
+ACL matches on.
 
 | File | Runs on | Purpose |
 |---|---|---|
@@ -42,7 +42,7 @@ The customer /25s in the ACL are split across two generators. Both scripts take
 | `10.248.82.138` | 10.248.82.128/25 | dummy0 |
 | `10.248.83.138` | 10.248.83.128/25 | dummy1 |
 
-Three subnets × four application ports = **12 concurrent streams per site**.
+Three subnets × five application ports = **15 concurrent streams per site** — 12 TCP and 3 UDP.
 
 | Application | Protocol | Source port | Destination port |
 |---|---|---|---|
@@ -50,6 +50,7 @@ Three subnets × four application ports = **12 concurrent streams per site**.
 | HTTPS | tcp | 443 | 6002 |
 | HTTPS-alt | tcp | 8443 | 6003 |
 | RDP over UDP | udp | 3389 | 6004 |
+| HTTP | tcp | 80 | 6005 |
 
 ## Order of operations
 
@@ -58,10 +59,10 @@ Three subnets × four application ports = **12 concurrent streams per site**.
 ```bash
 cd ~/qosgen && git pull
 ./lab/custLinux_setup.sh status          # confirm 10.10.10.10 on ens4
-./lab/custLinux_setup.sh listeners       # accept TCP on 6001-6003
+./lab/custLinux_setup.sh listeners       # accept TCP on 6001-6003 and 6005
 ```
 
-The listener is a small python3 program rather than `nc`, because six sources hit each
+The listener is a small python3 program rather than `nc`, because every source hits each
 destination port at once and netcat serves one connection at a time even with `-k`.
 Nothing needs installing — python3 is in every Ubuntu image. Connections are logged to
 `/tmp/qosgen-listeners.log`, so you can see exactly which sources arrived.
@@ -99,7 +100,7 @@ ip route 10.248.77.10  255.255.255.255 10.248.76.10
 `10.248.76.10` is WestLinux's real address and should already be routable. When
 EastLinux exists, it needs the same for `10.248.82.138` and `10.248.83.138`.
 
-Without these, the user's TCP ACKs have nowhere to go and the 9 TCP streams never get
+Without these, the user's TCP ACKs have nowhere to go and the 12 TCP streams never get
 past the handshake. The 3 UDP streams flow regardless — a useful way to tell a routing
 problem from a marking problem.
 
@@ -108,14 +109,14 @@ problem from a marking problem.
 On the generator:
 
 ```bash
-sudo ./lab/customer-streams.sh                    # west, 12 streams, 10 pps each
+sudo ./lab/customer-streams.sh                    # west, 15 streams, 10 pps each
 sudo PPS=50 ./lab/customer-streams.sh             # heavier
 sudo SITE=east ./lab/customer-streams.sh          # once EastLinux exists
 ```
 
-`sudo` because source port 443 is privileged, and because a mixed root/non-root process
-group can't be stopped by one Ctrl+C — an unprivileged shell isn't allowed to signal a
-root process. Ctrl+C stops all 12.
+`sudo` because source ports 80 and 443 are privileged, and because a mixed root/non-root
+process group can't be stopped by one Ctrl+C — an unprivileged shell isn't allowed to
+signal a root process. Ctrl+C stops all 15.
 
 Each stream prints its own packet count on exit, so a combination that isn't matching
 stands out as an outlier.
