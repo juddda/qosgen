@@ -16,23 +16,33 @@ matches on.
 Two Linux nodes:
 
 - **generator — WestLinux**, `10.248.76.10/25` on ens4. Stands in for the customer's
-  application servers and sources all the traffic.
-- **user — NorthLinux**, `10.10.10.10/24` on ens4. Stands in for the person using those
-  applications, and receives it.
+  application servers and sources the traffic for the west subnets. A second generator,
+  **EastLinux**, will do the same for the 10.248.8x subnets; it isn't built yet.
+- **user — custLinux**, `10.10.10.10/24` on ens4. Stands in for the person using those
+  applications, and receives the traffic.
 
 ## The stream matrix
 
-Six customer subnets from the ACL, each sending on all four application ports —
-**24 concurrent streams**, covering every ACL line in one run:
+The customer /25s in the ACL are split across two generators. Both scripts take
+`SITE=west` (the default) or `SITE=east`:
+
+**west — WestLinux**
 
 | Source address | Subnet | Note |
 |---|---|---|
-| `10.248.76.10` | 10.248.76.0/25 | the generator's own lab NIC — no dummy needed |
+| `10.248.76.10` | 10.248.76.0/25 | WestLinux's own lab NIC — no dummy needed |
 | `10.248.76.138` | 10.248.76.128/25 | dummy0 |
 | `10.248.77.10` | 10.248.77.0/25 | dummy1 |
-| `10.248.82.10` | 10.248.82.0/25 | dummy2 |
-| `10.248.82.138` | 10.248.82.128/25 | dummy3 |
-| `10.248.83.138` | 10.248.83.128/25 | dummy4 |
+
+**east — EastLinux, not built yet**
+
+| Source address | Subnet | Note |
+|---|---|---|
+| `10.248.82.10` | 10.248.82.0/25 | assumed to be EastLinux's own lab NIC — confirm when built |
+| `10.248.82.138` | 10.248.82.128/25 | dummy0 |
+| `10.248.83.138` | 10.248.83.128/25 | dummy1 |
+
+Three subnets × four application ports = **12 concurrent streams per site**.
 
 | Application | Protocol | Source port | Destination port |
 |---|---|---|---|
@@ -43,7 +53,7 @@ Six customer subnets from the ACL, each sending on all four application ports �
 
 ## Order of operations
 
-### 1. User host — NorthLinux
+### 1. User host — custLinux
 
 ```bash
 cd ~/qosgen && git pull
@@ -70,8 +80,9 @@ sudo ./lab/dummy-interfaces.sh up
 ./lab/dummy-interfaces.sh status
 ```
 
-The five dummy addresses exist because `bind()` only accepts addresses the kernel owns,
-and those customer subnets aren't on this node. `/32` each — the mask never appears in
+The dummy addresses exist because `bind()` only accepts addresses the kernel owns, and
+those customer subnets aren't on this node. WestLinux needs two; its third subnet is the
+one its own lab NIC sits in. `/32` each — the mask never appears in
 the packet, so a `/32` matches a `/25` ACL entry identically, while a `/25` would
 blackhole the whole block locally.
 
@@ -81,17 +92,15 @@ A host route per source address, pointing back at the generator, more specific t
 null route covering those prefixes:
 
 ```
-ip route 10.248.76.138 255.255.255.255 <westlinux-lab-ip>
-ip route 10.248.77.10  255.255.255.255 <westlinux-lab-ip>
-ip route 10.248.82.10  255.255.255.255 <westlinux-lab-ip>
-ip route 10.248.82.138 255.255.255.255 <westlinux-lab-ip>
-ip route 10.248.83.138 255.255.255.255 <westlinux-lab-ip>
+ip route 10.248.76.138 255.255.255.255 10.248.76.10
+ip route 10.248.77.10  255.255.255.255 10.248.76.10
 ```
 
-`10.248.76.10` is the generator's real address and should already be routable.
+`10.248.76.10` is WestLinux's real address and should already be routable. When
+EastLinux exists, it needs the same for `10.248.82.138` and `10.248.83.138`.
 
-Without these, the user's TCP ACKs have nowhere to go and the 18 TCP streams never get
-past the handshake. The 6 UDP streams flow regardless — a useful way to tell a routing
+Without these, the user's TCP ACKs have nowhere to go and the 9 TCP streams never get
+past the handshake. The 3 UDP streams flow regardless — a useful way to tell a routing
 problem from a marking problem.
 
 ### 4. Run it
@@ -99,14 +108,14 @@ problem from a marking problem.
 On the generator:
 
 ```bash
-sudo ./lab/customer-streams.sh                    # 24 streams, 10 pps each
+sudo ./lab/customer-streams.sh                    # west, 12 streams, 10 pps each
 sudo PPS=50 ./lab/customer-streams.sh             # heavier
-sudo DST_IP=10.10.10.10 ./lab/customer-streams.sh # explicit destination
+sudo SITE=east ./lab/customer-streams.sh          # once EastLinux exists
 ```
 
 `sudo` because source port 443 is privileged, and because a mixed root/non-root process
 group can't be stopped by one Ctrl+C — an unprivileged shell isn't allowed to signal a
-root process. Ctrl+C stops all 24.
+root process. Ctrl+C stops all 12.
 
 Each stream prints its own packet count on exit, so a combination that isn't matching
 stands out as an outlier.

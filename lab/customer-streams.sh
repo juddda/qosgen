@@ -14,9 +14,16 @@
 # That is why the ACL matches source ports: it classifies this direction, and
 # from the network's point of view the application server is the talker.
 #
-# 6 source subnets × 4 application ports = 24 concurrent streams, which covers
-# every ACL line in a single run. Each stream reports its own packet count on
-# exit, so a combination that isn't matching shows up as an outlier.
+# The customer /25s in the ACL are split across two generators:
+#
+#   west (10.248.76.x, 10.248.77.x)   WestLinux  — 3 subnets
+#   east (10.248.8x.x)                EastLinux  — 3 subnets, node not built yet
+#
+# Pick one with SITE:  sudo SITE=east ./lab/customer-streams.sh
+#
+# Each site's subnets × 4 application ports = 12 concurrent streams, covering
+# that site's ACL lines in a single run. Each stream reports its own packet
+# count on exit, so a combination that isn't matching shows up as an outlier.
 #
 # Path under test: traffic leaves this host unmarked (DSCP 0), reaches the
 # perimeter router on its LAN-facing interface, and is marked AF31 there before
@@ -47,7 +54,8 @@
 # Prerequisites — see ../stream.md and streaming-lab-setup_README.md:
 #   1. A dummy interface per source address, so bind() accepts them:
 #        sudo ./lab/dummy-interfaces.sh up
-#      (10.248.76.10 is the generator's own lab address and needs no dummy)
+#      (the generator's own lab address needs no dummy — on WestLinux that is
+#       10.248.76.10)
 #   2. A /32 route on the routers pointing each source address back at this
 #      host, more specific than any null route — the user's TCP ACKs are
 #      addressed to those source addresses, and without a path back the
@@ -64,16 +72,29 @@ PPS="${PPS:-10}"                    # packets/sends per second, per stream
 SIZE="${SIZE:-512}"                 # payload bytes per packet
 PYTHON="${PYTHON:-python3}"
 
-# One address per customer /25 in the ACL. The first is this host's own lab
-# address; the rest live on dummy interfaces created by dummy-interfaces.sh.
-SOURCES=(
-  "10.248.76.10"     # 10.248.76.0/25   — the generator's own lab NIC
+SITE="${SITE:-west}"
+
+# One address per customer /25 in the ACL, grouped by generator. The first entry
+# in each is that host's own lab NIC; the rest live on dummy interfaces created
+# by dummy-interfaces.sh.
+WEST_SOURCES=(
+  "10.248.76.10"     # 10.248.76.0/25   — WestLinux's own lab NIC
   "10.248.76.138"    # 10.248.76.128/25
   "10.248.77.10"     # 10.248.77.0/25
-  "10.248.82.10"     # 10.248.82.0/25
+)
+
+# EastLinux is not built yet; the native address is an assumption to confirm.
+EAST_SOURCES=(
+  "10.248.82.10"     # 10.248.82.0/25   — EastLinux's own lab NIC (assumed)
   "10.248.82.138"    # 10.248.82.128/25
   "10.248.83.138"    # 10.248.83.128/25
 )
+
+case "$SITE" in
+  west) SOURCES=("${WEST_SOURCES[@]}") ;;
+  east) SOURCES=("${EAST_SOURCES[@]}") ;;
+  *) echo "error: SITE must be 'west' or 'east', not '$SITE'" >&2; exit 1 ;;
+esac
 
 # One line per application: protocol, source port, destination port.
 # Distinct destination ports keep the four applications separable in a capture
@@ -101,7 +122,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 total=$(( ${#SOURCES[@]} * ${#APPS[@]} ))
-echo "Destination $DST_IP — $total streams, ${PPS} pps × ${SIZE} B each. Ctrl+C to stop."
+echo "Site '$SITE' → $DST_IP — $total streams, ${PPS} pps × ${SIZE} B each. Ctrl+C to stop."
 echo
 
 # kill 0 signals the whole process group, so one Ctrl+C takes down every stream.

@@ -12,11 +12,17 @@
 #   sudo ./lab/dummy-interfaces.sh down    # remove them
 #   ./lab/dummy-interfaces.sh status       # show what exists (no root needed)
 #
-# Addresses match the SOURCES array in customer-streams.sh — edit both together.
+# Addresses match the SOURCES arrays in customer-streams.sh — edit both together.
 #
-# One address per customer /25 in the WAN QoS ACL, except 10.248.76.0/25: the
-# generator already holds 10.248.76.10 on its lab NIC, so that subnet needs no
-# dummy. The streams bind it directly.
+# The customer /25s in the WAN QoS ACL are split across two generators:
+#
+#   west (10.248.76.x, 10.248.77.x)   WestLinux
+#   east (10.248.8x.x)                EastLinux — not built yet
+#
+# Pick one with SITE:  sudo SITE=east ./lab/dummy-interfaces.sh up
+#
+# Each site's generator already holds one of its subnets on its own lab NIC, so
+# that subnet gets no dummy — the streams bind the real address directly.
 #
 # Why /32 and not the ACL's real /25: the mask never appears in the packet. The IP
 # header carries a bare 32-bit source address, and the router tests it against its
@@ -29,13 +35,26 @@
 set -uo pipefail
 
 # One line per source: interface  address
-SOURCES=(
+SITE="${SITE:-west}"
+
+# WestLinux holds 10.248.76.10 on ens4, so 10.248.76.0/25 needs no dummy.
+WEST_SOURCES=(
   "dummy0  10.248.76.138"    # 10.248.76.128/25
   "dummy1  10.248.77.10"     # 10.248.77.0/25
-  "dummy2  10.248.82.10"     # 10.248.82.0/25
-  "dummy3  10.248.82.138"    # 10.248.82.128/25
-  "dummy4  10.248.83.138"    # 10.248.83.128/25
 )
+
+# EastLinux does not exist yet. The native address below is an assumption —
+# confirm it when the node is built, and drop whichever subnet it lands in.
+EAST_SOURCES=(
+  "dummy0  10.248.82.138"    # 10.248.82.128/25
+  "dummy1  10.248.83.138"    # 10.248.83.128/25
+)                            # 10.248.82.0/25 assumed native on EastLinux
+
+case "$SITE" in
+  west) SOURCES=("${WEST_SOURCES[@]}") ;;
+  east) SOURCES=("${EAST_SOURCES[@]}") ;;
+  *) echo "error: SITE must be 'west' or 'east', not '$SITE'" >&2; exit 1 ;;
+esac
 
 PREFIX=32          # host route only — see the note above
 ACTION="${1:-up}"
