@@ -175,7 +175,7 @@ qosgen/
 ├── SPEC.md          # this file
 ├── lab/
 │   ├── qos-policy-1mb.cfg   # example Cisco shaper + queueing policy
-│   └── four-sources.sh      # launcher: four concurrent streams
+│   └── customer-streams.sh  # launcher: all source subnets × application ports
 └── .gitignore       # standard Python
 ```
 

@@ -2,35 +2,38 @@
 #
 # custLinux_setup.sh — prepare a Linux server to be the USER end of a qosgen test.
 #
-# Traffic in this lab runs datacentre -> user: the generator stands in for the DC
-# application servers (see four-sources.sh), and this host stands in for the user
-# consuming those applications across the WAN. It is the destination, so it needs
-# very little — a routable lab address and something listening for the TCP streams.
-# qosgen itself is not required here.
+# Traffic in this lab runs application -> user: the generator stands in for the
+# customer's application servers (see customer-streams.sh), and this host stands
+# in for the user consuming those applications across the WAN. It is the
+# destination, so it needs very little — a routable lab address and something
+# listening for the TCP streams. qosgen itself is not required here.
 #
 #   sudo ./lab/custLinux_setup.sh netplan     # static address on the lab NIC
-#        ./lab/custLinux_setup.sh listeners   # start nc listeners for the TCP streams
-#        ./lab/custLinux_setup.sh stop        # stop those listeners
+#        ./lab/custLinux_setup.sh listeners   # accept the TCP streams
+#        ./lab/custLinux_setup.sh stop        # stop the listener
 #        ./lab/custLinux_setup.sh status      # address, routes, listeners, firewall
 #        ./lab/custLinux_setup.sh capture     # tcpdump the arriving streams (needs sudo)
 #
-# Override any of these on the command line:
+# Defaults match this lab: 10.10.10.10/24 via 10.10.10.1, listening on tcp
+# 6001-6003, capturing traffic from 10.248.0.0/16. Override any of them:
 #
-#   sudo ADDR=10.20.20.10 PREFIX=24 GATEWAY=10.20.20.1 IFACE=ens4 \
+#   sudo ADDR=10.10.10.10 PREFIX=24 GATEWAY=10.10.10.1 IFACE=ens4 \
 #        ./lab/custLinux_setup.sh netplan
 #
-# Ubuntu/netplan only for the 'netplan' action; the rest work anywhere with nc.
+# The 'netplan' action is Ubuntu-only. The listener needs python3, which every
+# Ubuntu image has — netcat is not required.
 
 set -uo pipefail
 
 IFACE="${IFACE:-ens4}"                  # the lab-facing NIC, not the DHCP one
-ADDR="${ADDR:-10.20.20.10}"             # this host's address in the user subnet
+ADDR="${ADDR:-10.10.10.10}"             # this host's address in the user subnet
 PREFIX="${PREFIX:-24}"                  # the user subnet's real prefix length
-GATEWAY="${GATEWAY:-10.20.20.1}"        # lab router on this segment
+GATEWAY="${GATEWAY:-10.10.10.1}"        # lab router on this segment
 TCP_PORTS="${TCP_PORTS:-6001 6002 6003}"   # destination ports of the TCP streams
-SRC_FILTER="${SRC_FILTER:-10.1.0.0/16}"    # DC app addresses, for the capture filter
+SRC_FILTER="${SRC_FILTER:-10.248.0.0/16}"  # customer source subnets, for the capture
 NETPLAN_FILE="${NETPLAN_FILE:-/etc/netplan/60-ens4-lab.yaml}"
 PIDFILE="${PIDFILE:-/tmp/qosgen-listeners.pid}"
+LOGFILE="${LOGFILE:-/tmp/qosgen-listeners.log}"
 
 ACTION="${1:-status}"
 
@@ -101,21 +104,58 @@ EOF
   listeners)
     # TCP needs a peer to complete the handshake, or the generator's connect()
     # fails outright. UDP needs nothing listening — the packets are one-way.
-    # -k keeps the listener alive across reconnects, so a restarted stream works.
+    #
+    # Why python3 rather than nc: every customer subnet sends to the same
+    # destination port, so each port takes several simultaneous connections.
+    # netcat serves one at a time even with -k, and the rest would sit in the
+    # backlog un-accepted. python3 is in every Ubuntu image, so this needs
+    # nothing installed.
     : > "$PIDFILE"
-    for port in $TCP_PORTS; do
-      # Port as a positional argument: '-l -p PORT' is accepted by some netcat
-      # builds and rejected by others, while '-l PORT' works everywhere.
-      if nc -h 2>&1 | grep -q -- '-k'; then
-        nc -l -k "$port" > /dev/null 2>&1 &
-      else
-        nc -l "$port" > /dev/null 2>&1 &
-      fi
-      echo "$!" >> "$PIDFILE"
-      echo "listening on tcp/$port (pid $!)"
-    done
-    echo
-    echo "Stop them with: $0 stop"
+    "${PYTHON:-python3}" - $TCP_PORTS > "$LOGFILE" 2>&1 <<'PYLISTENER' &
+import socket, sys, threading, time
+
+ports = [int(p) for p in sys.argv[1:]]
+counts = {}
+lock = threading.Lock()
+
+def drain(conn, addr, port):
+    total = 0
+    try:
+        while True:
+            data = conn.recv(65536)
+            if not data:
+                break
+            total += len(data)
+    except OSError:
+        pass
+    finally:
+        conn.close()
+        with lock:
+            counts[(port, addr[0])] = counts.get((port, addr[0]), 0) + total
+        print(f"{time.strftime('%H:%M:%S')} closed {addr[0]}:{addr[1]} -> :{port}, "
+              f"{total} bytes", flush=True)
+
+def serve(port):
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("", port))
+    srv.listen(64)                      # deep backlog: 6 sources arrive at once
+    print(f"listening on tcp/{port}", flush=True)
+    while True:
+        conn, addr = srv.accept()
+        print(f"{time.strftime('%H:%M:%S')} accepted {addr[0]}:{addr[1]} -> :{port}",
+              flush=True)
+        threading.Thread(target=drain, args=(conn, addr, port), daemon=True).start()
+
+for p in ports:
+    threading.Thread(target=serve, args=(p,), daemon=True).start()
+threading.Event().wait()
+PYLISTENER
+    echo "$!" > "$PIDFILE"
+    sleep 0.5
+    echo "listener started (pid $(cat "$PIDFILE")) on tcp: $TCP_PORTS"
+    echo "  connections are logged to $LOGFILE"
+    echo "  stop it with: $0 stop"
     ;;
 
   stop)

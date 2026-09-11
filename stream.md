@@ -125,7 +125,7 @@ sudo sysctl -w net.ipv4.ip_nonlocal_bind=1
 ```
 
 [`lab/dummy-interfaces.sh`](lab/dummy-interfaces.sh) does the first of those for the
-four addresses `lab/four-sources.sh` sends from, and can undo it again:
+addresses `lab/customer-streams.sh` sends from, and can undo it again:
 
 ```bash
 sudo ./lab/dummy-interfaces.sh up       # create dummy0-3 with their addresses
@@ -159,17 +159,18 @@ exactly like a broken generator.
 
 ## Running several streams at once
 
-One invocation is one stream. [`lab/four-sources.sh`](lab/four-sources.sh) starts
-four together and stops them all on Ctrl+C. It models traffic flowing **datacentre
-to user**: the generator stands in for the DC application servers, so the app ports
-(TCP 3389/443/8443, UDP 3389) are the *source* ports — which is what the WAN QoS
-ACL matches on — and the destination is a user host consuming those applications:
+One invocation is one stream. [`lab/customer-streams.sh`](lab/customer-streams.sh)
+starts a whole matrix together and stops them all on Ctrl+C — every customer source
+subnet against every application port. It models traffic flowing **application to
+user**: the generator stands in for the customer's application servers, so the app
+ports (TCP 3389/443/8443, UDP 3389) are the *source* ports — which is what the WAN
+QoS ACL matches on — and the destination is a user host consuming those applications:
 
 ```bash
-sudo PYTHON="$(command -v python)" DST_IP=10.248.248.1 ./lab/four-sources.sh
+sudo DST_IP=10.10.10.10 ./lab/customer-streams.sh
 ```
 
-Edit the `STREAMS` array in that file to match your addresses and ports;
+Edit the `SOURCES` and `APPS` arrays in that file to match your addresses and ports;
 [`lab/streaming-lab-setup_README.md`](lab/streaming-lab-setup_README.md) walks the whole
 test in order, naming which node runs which step. Two
 reasons it wants `sudo`: source ports below 1024 (443) are privileged, and an

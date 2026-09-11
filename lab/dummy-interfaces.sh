@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# dummy-interfaces.sh — create the four source addresses four-sources.sh sends from.
+# dummy-interfaces.sh — create the source addresses customer-streams.sh sends from.
 #
 # A QoS ACL usually matches source subnets the generator host isn't in, but bind()
 # only accepts addresses the kernel owns. A dummy interface solves that: the address
@@ -12,7 +12,11 @@
 #   sudo ./lab/dummy-interfaces.sh down    # remove them
 #   ./lab/dummy-interfaces.sh status       # show what exists (no root needed)
 #
-# Addresses match the STREAMS array in four-sources.sh — edit both together.
+# Addresses match the SOURCES array in customer-streams.sh — edit both together.
+#
+# One address per customer /25 in the WAN QoS ACL, except 10.248.76.0/25: the
+# generator already holds 10.248.76.10 on its lab NIC, so that subnet needs no
+# dummy. The streams bind it directly.
 #
 # Why /32 and not the ACL's real /25: the mask never appears in the packet. The IP
 # header carries a bare 32-bit source address, and the router tests it against its
@@ -26,10 +30,11 @@ set -uo pipefail
 
 # One line per source: interface  address
 SOURCES=(
-  "dummy0  10.1.1.10"
-  "dummy1  10.1.2.10"
-  "dummy2  10.1.3.10"
-  "dummy3  10.1.4.10"
+  "dummy0  10.248.76.138"    # 10.248.76.128/25
+  "dummy1  10.248.77.10"     # 10.248.77.0/25
+  "dummy2  10.248.82.10"     # 10.248.82.0/25
+  "dummy3  10.248.82.138"    # 10.248.82.128/25
+  "dummy4  10.248.83.138"    # 10.248.83.128/25
 )
 
 PREFIX=32          # host route only — see the note above
