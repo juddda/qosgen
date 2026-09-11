@@ -34,6 +34,7 @@ SRC_FILTER="${SRC_FILTER:-10.248.0.0/16}"  # customer source subnets, for the ca
 NETPLAN_FILE="${NETPLAN_FILE:-/etc/netplan/60-ens4-lab.yaml}"
 PIDFILE="${PIDFILE:-/tmp/qosgen-listeners.pid}"
 LOGFILE="${LOGFILE:-/tmp/qosgen-listeners.log}"
+LISTENER_PY="${LISTENER_PY:-/tmp/qosgen-listener.py}"
 
 ACTION="${1:-status}"
 
@@ -111,7 +112,16 @@ EOF
     # backlog un-accepted. python3 is in every Ubuntu image, so this needs
     # nothing installed.
     : > "$PIDFILE"
-    "${PYTHON:-python3}" - $TCP_PORTS > "$LOGFILE" 2>&1 <<'PYLISTENER' &
+
+    # The listener is written out and then launched detached, rather than run
+    # inline. Two reasons: nohup needs a command to wrap, and a named file makes
+    # the process identifiable to 'stop' without pattern-matching "python3 -".
+    #
+    # Detaching matters because this is normally started over SSH. A plain
+    # background job dies with SIGHUP when the session closes, and the failure is
+    # silent — the ports stop being bound, and the next TCP stream fails with
+    # "connection refused" for no visible reason.
+    cat > "$LISTENER_PY" <<'PYLISTENER'
 import socket, sys, threading, time
 
 ports = [int(p) for p in sys.argv[1:]]
@@ -151,6 +161,11 @@ for p in ports:
     threading.Thread(target=serve, args=(p,), daemon=True).start()
 threading.Event().wait()
 PYLISTENER
+
+    SETSID=""
+    command -v setsid > /dev/null 2>&1 && SETSID="setsid"   # not present on macOS
+    $SETSID nohup "${PYTHON:-python3}" "$LISTENER_PY" $TCP_PORTS \
+        > "$LOGFILE" 2>&1 &
     echo "$!" > "$PIDFILE"
     sleep 0.5
     echo "listener started (pid $(cat "$PIDFILE")) on tcp: $TCP_PORTS"
@@ -170,6 +185,8 @@ PYLISTENER
         echo "pid $pid already gone"
       fi
     done < "$PIDFILE"
+    # Belt and braces: setsid means the listener may outlive a stale pidfile.
+    pkill -f 'python3 -$' 2> /dev/null && echo "cleaned up a stray listener"
     rm -f "$PIDFILE"
     ;;
 
