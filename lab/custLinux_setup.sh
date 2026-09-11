@@ -60,9 +60,13 @@ case "$ACTION" in
     #
     # No default route here on purpose: the default must stay on the DHCP
     # interface or the host loses its internet path, and two default routes give
-    # you asymmetric routing that is miserable to debug. Specific RFC 1918
-    # prefixes via the lab router instead — that is what carries return traffic
-    # back toward the DC application addresses.
+    # you asymmetric routing that is miserable to debug. Specific prefixes via
+    # the lab router instead — that is what carries return traffic back toward
+    # the DC application addresses.
+    #
+    # 10/8 and 172.16/12 only. 192.168/16 is deliberately absent: the lab never
+    # uses it, and the management network does, so routing it at the lab router
+    # would be all risk and no benefit.
     cat > "$NETPLAN_FILE" <<EOF
 network:
   version: 2
@@ -78,17 +82,14 @@ network:
           via: ${GATEWAY}
         - to: 172.16.0.0/12
           via: ${GATEWAY}
-        - to: 192.168.0.0/16
-          via: ${GATEWAY}
 EOF
     chmod 600 "$NETPLAN_FILE"      # netplan warns if the file is world-readable
     echo "wrote $NETPLAN_FILE"
     echo
 
-    # A more specific route beats a less specific one, so an SSH session from a
-    # 192.168.x.y address on the DHCP interface's own /24 survives the /16 above.
-    # From anywhere else on RFC 1918, it will not — hence 'try', which rolls back
-    # in 120 seconds unless you confirm.
+    # 'try' rather than 'apply': a route change on the wrong interface can cut the
+    # session you are typing into, and this rolls back in 120 seconds unless you
+    # confirm. Cheap insurance on a host you reach only over SSH.
     echo "Applying with 'netplan try' — press ENTER to keep it, or wait 120s to roll back."
     netplan try
 

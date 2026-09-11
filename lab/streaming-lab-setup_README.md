@@ -28,9 +28,10 @@ sudo ADDR=<user-ip> PREFIX=<len> GATEWAY=<lab-router-ip> ./lab/custLinux_setup.s
 ./lab/custLinux_setup.sh status
 ```
 
-`netplan` gives the lab NIC a static address with RFC 1918 prefixes via the lab router
-and **no default route** — the default stays on the DHCP interface so the node keeps its
-internet path. It applies with `netplan try`, which rolls back in 120 seconds if the
+`netplan` gives the lab NIC a static address with the lab prefixes (10/8 and 172.16/12)
+via the lab router and **no default route** — the default stays on the DHCP interface so
+the node keeps its internet path. 192.168/16 is deliberately not routed to the lab: the
+lab doesn't use it and the management network does. It applies with `netplan try`, which rolls back in 120 seconds if the
 change cuts your session.
 
 `listeners` starts `nc` on the TCP destination ports. UDP needs nothing listening.
