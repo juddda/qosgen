@@ -30,6 +30,7 @@ ADDR="${ADDR:-10.10.10.10}"             # this host's address in the user subnet
 PREFIX="${PREFIX:-24}"                  # the user subnet's real prefix length
 GATEWAY="${GATEWAY:-10.10.10.1}"        # lab router on this segment
 TCP_PORTS="${TCP_PORTS:-6001 6002 6003 6005}"   # destination ports of the TCP streams
+UDP_PORTS="${UDP_PORTS:-6004}"             # destination port of the UDP stream
 SRC_FILTER="${SRC_FILTER:-10.248.0.0/16}"  # customer source subnets, for the capture
 NETPLAN_FILE="${NETPLAN_FILE:-/etc/netplan/60-ens4-lab.yaml}"
 PIDFILE="${PIDFILE:-/tmp/qosgen-listeners.pid}"
@@ -104,13 +105,15 @@ EOF
 
   listeners)
     # TCP needs a peer to complete the handshake, or the generator's connect()
-    # fails outright. UDP needs nothing listening — the packets are one-way.
+    # fails outright. UDP needs no listener to reach the host — but binding one
+    # lets us read the TOS byte of what arrives, which is the whole point of the
+    # test and otherwise needs tcpdump and root.
     #
     # Why python3 rather than nc: every customer subnet sends to the same
     # destination port, so each port takes several simultaneous connections.
-    # netcat serves one at a time even with -k, and the rest would sit in the
-    # backlog un-accepted. python3 is in every Ubuntu image, so this needs
-    # nothing installed.
+    # netcat serves one at a time even with -k, and the rest sit un-accepted in
+    # the backlog. python3 is in every Ubuntu image, so this needs nothing
+    # installed.
     : > "$PIDFILE"
 
     # The listener is written out and then launched detached, rather than run
@@ -122,54 +125,122 @@ EOF
     # silent — the ports stop being bound, and the next TCP stream fails with
     # "connection refused" for no visible reason.
     cat > "$LISTENER_PY" <<'PYLISTENER'
-import socket, sys, threading, time
+"""Accept the test streams and report what arrived, including the DSCP.
 
-ports = [int(p) for p in sys.argv[1:]]
-counts = {}
+TCP ports are accepted concurrently; UDP ports are bound with IP_RECVTOS so the
+TOS byte of each datagram is readable without root. Unmarked traffic arrives as
+tos=0x00; traffic the router marked AF31 arrives as tos=0x68 (DSCP 26).
+"""
+import socket
+import sys
+import threading
+import time
+
+argv = sys.argv[1:]
+split = argv.index("--udp") if "--udp" in argv else len(argv)
+tcp_ports = [int(p) for p in argv[:split]]
+udp_ports = [int(p) for p in argv[split + 1:]]
+
 lock = threading.Lock()
+seen = {}          # (proto, dport, src, sport, tos) -> bytes received
+logged = {}        # same key -> bytes at the last progress line
+STEP = 250_000     # bytes between progress lines, so 15 flows stay readable
 
-def drain(conn, addr, port):
-    total = 0
+
+def note(proto, dport, src, sport, tos, count):
+    """Log the first sighting of each flow, then occasional progress."""
+    key = (proto, dport, src, sport, tos)
+    with lock:
+        first = key not in seen
+        seen[key] = seen.get(key, 0) + count
+        total = seen[key]
+        due = total - logged.get(key, 0) >= STEP
+        if first or due:
+            logged[key] = total
+    if first:
+        tos_str = "unknown" if tos is None else f"0x{tos:02x} (DSCP {tos >> 2})"
+        print(f"{time.strftime('%H:%M:%S')} {proto}/{dport} <- {src}:{sport}  "
+              f"tos={tos_str}", flush=True)
+    elif due:
+        print(f"{time.strftime('%H:%M:%S')} {proto}/{dport} <- {src}:{sport}  "
+              f"{total // 1024} KiB", flush=True)
+
+
+def drain_tcp(conn, addr, port):
+    # IP_RECVTOS on a stream socket is not supported everywhere; if it works we
+    # get the DSCP for free, and if not we still count the bytes.
+    tos = None
+    try:
+        conn.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
+        data, anc, _flags, _addr = conn.recvmsg(65536, socket.CMSG_SPACE(64))
+        tos = next((v[0] for lvl, _t, v in anc
+                    if lvl == socket.IPPROTO_IP and v), None)
+        note("tcp", port, addr[0], addr[1], tos, len(data))
+    except (OSError, ValueError):
+        note("tcp", port, addr[0], addr[1], None, 0)
     try:
         while True:
             data = conn.recv(65536)
             if not data:
                 break
-            total += len(data)
+            note("tcp", port, addr[0], addr[1], tos, len(data))
     except OSError:
         pass
     finally:
         conn.close()
-        with lock:
-            counts[(port, addr[0])] = counts.get((port, addr[0]), 0) + total
-        print(f"{time.strftime('%H:%M:%S')} closed {addr[0]}:{addr[1]} -> :{port}, "
-              f"{total} bytes", flush=True)
 
-def serve(port):
+
+def serve_tcp(port):
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("", port))
-    srv.listen(64)                      # deep backlog: 6 sources arrive at once
-    print(f"listening on tcp/{port}", flush=True)
+    srv.listen(64)                  # deep backlog: every source arrives at once
+    print(f"listening tcp/{port}", flush=True)
     while True:
         conn, addr = srv.accept()
-        print(f"{time.strftime('%H:%M:%S')} accepted {addr[0]}:{addr[1]} -> :{port}",
-              flush=True)
-        threading.Thread(target=drain, args=(conn, addr, port), daemon=True).start()
+        threading.Thread(target=drain_tcp, args=(conn, addr, port),
+                         daemon=True).start()
 
-for p in ports:
-    threading.Thread(target=serve, args=(p,), daemon=True).start()
+
+def serve_udp(port):
+    srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    have_tos = True
+    try:
+        srv.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
+    except (AttributeError, OSError):
+        have_tos = False
+    srv.bind(("", port))
+    print(f"listening udp/{port}" + ("" if have_tos else " (no TOS support)"),
+          flush=True)
+    while True:
+        if have_tos:
+            data, anc, _flags, addr = srv.recvmsg(65535, socket.CMSG_SPACE(64))
+            tos = next((v[0] for lvl, _t, v in anc
+                        if lvl == socket.IPPROTO_IP and v), None)
+        else:
+            data, addr = srv.recvfrom(65535)
+            tos = None
+        note("udp", port, addr[0], addr[1], tos, len(data))
+
+
+for p in tcp_ports:
+    threading.Thread(target=serve_tcp, args=(p,), daemon=True).start()
+for p in udp_ports:
+    threading.Thread(target=serve_udp, args=(p,), daemon=True).start()
 threading.Event().wait()
 PYLISTENER
 
     SETSID=""
     command -v setsid > /dev/null 2>&1 && SETSID="setsid"   # not present on macOS
-    $SETSID nohup "${PYTHON:-python3}" "$LISTENER_PY" $TCP_PORTS \
+    $SETSID nohup "${PYTHON:-python3}" "$LISTENER_PY" $TCP_PORTS --udp $UDP_PORTS \
         > "$LOGFILE" 2>&1 &
     echo "$!" > "$PIDFILE"
     sleep 0.5
-    echo "listener started (pid $(cat "$PIDFILE")) on tcp: $TCP_PORTS"
-    echo "  connections are logged to $LOGFILE"
+    echo "listener started (pid $(cat "$PIDFILE"))"
+    echo "  tcp: $TCP_PORTS"
+    echo "  udp: $UDP_PORTS  (reports the DSCP of arriving packets)"
+    echo "  log: $LOGFILE"
     echo "  stop it with: $0 stop"
     ;;
 
