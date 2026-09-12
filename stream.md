@@ -178,6 +178,83 @@ unprivileged shell can't signal a root process, so a mixed process group won't
 die on one Ctrl+C. `PYTHON` is passed explicitly because sudo resets PATH to
 root's, where the conda env's interpreter — and click — isn't found.
 
+## Order of operations
+
+The order matters, and each step has a distinct failure signature if it's skipped —
+worth knowing, because several of them look like a broken QoS policy rather than a
+missing step.
+
+### 1. Receiver first — always
+
+```bash
+# on the destination host
+sudo python3 lab/listener.py --sniff --iface <lab-nic> --summary-every 5
+```
+
+**Skip it and:** TCP streams exit immediately with "nothing is listening", and every
+UDP datagram draws an ICMP port-unreachable back from the destination. The sender
+ignores those (its socket is unconnected, on purpose) and keeps sending, so the counts
+still look right while your capture fills with ICMP noise.
+
+`--sniff` needs root because it reads IP headers off the wire — the same privilege
+tcpdump needs, for the same reason. Without it, UDP markings are still reported but TCP
+shows `?`: the kernel does not expose a TCP packet's TOS byte to the receiving process
+(verified on Ubuntu 24.04 / kernel 6.8, including with `IP_RECVTOS` set on the listening
+socket before `accept()`).
+
+### 2. Source addresses on the generator
+
+```bash
+sudo ./lab/dummy-interfaces.sh up
+./lab/dummy-interfaces.sh status
+```
+
+**Skip it and:** `bind()` fails with "is not an address on this host" before a single
+packet leaves. `/32` per address — see the section above for why not the ACL's real
+prefix length.
+
+### 3. Return routes on the routers
+
+```
+ip route <source-address> 255.255.255.255 <generator-lab-ip>
+```
+
+**Skip it and:** UDP flows perfectly while every TCP stream hangs at the handshake,
+because the destination's SYN-ACK has nowhere to go. That split — UDP fine, TCP dead —
+is the signature of a missing return route, not of a policy problem.
+
+### 4. Generate
+
+```bash
+sudo ./lab/customer-streams.sh
+```
+
+`sudo` for two reasons: source ports below 1024 are privileged, and an unprivileged
+shell cannot signal a root process, so a mixed process group won't stop on one Ctrl+C.
+
+### 5. Verify from three independent places
+
+| Evidence | Where | Shows |
+|---|---|---|
+| Listener table | destination host | Per-flow DSCP, packets, bytes — live |
+| pcap | `sudo ./lab/custLinux_setup.sh capture` | A file the customer opens themselves |
+| ACL counters | `show ip access-lists <name>` on the router | Which ACL lines matched, and which didn't |
+
+Three sources agreeing is proof; one is an assertion. The ACL counters are the most
+precise of the three — they name the exact line that matched.
+
+### 6. Teardown
+
+```bash
+# destination
+./lab/custLinux_setup.sh stop
+# generator
+sudo ./lab/dummy-interfaces.sh down
+```
+
+Dummy interfaces don't survive a reboot, and neither does `ip_nonlocal_bind`. Nothing
+here persists by design — re-running the steps is the intended recovery.
+
 ## Confirming it on the wire
 
 ```bash
