@@ -172,8 +172,22 @@ EOF
     need_root
     # This host sits beyond the perimeter router, so traffic arriving here should
     # already carry the marking the router applied — AF31 shows as tos 0x68.
-    echo "Capturing on $IFACE from $SRC_FILTER — expect tos 0x68 (AF31). Ctrl+C to stop."
-    tcpdump -v -n -i "$IFACE" "net ${SRC_FILTER}"
+    #
+    # Written to a pcap as well as printed: a capture file is evidence the
+    # customer can open in Wireshark themselves, which a screenful of scrollback
+    # is not. --print makes tcpdump do both (4.99+); older builds only write.
+    PCAP="${PCAP:-/tmp/qosgen-capture.pcap}"
+    echo "Capturing on $IFACE from $SRC_FILTER — expect tos 0x68 (AF31)."
+    echo "  saving to $PCAP"
+    echo "  Wireshark filter afterwards:  ip.dsfield.dscp == 26"
+    echo "  Ctrl+C to stop."
+    echo
+    if tcpdump --help 2>&1 | grep -q -- '--print'; then
+      tcpdump -v -n -i "$IFACE" --print -w "$PCAP" "net ${SRC_FILTER}"
+    else
+      echo "  (this tcpdump cannot print and write at once — writing only)"
+      tcpdump -n -i "$IFACE" -w "$PCAP" "net ${SRC_FILTER}"
+    fi
     ;;
 
   *)
