@@ -80,7 +80,7 @@ SITE="${SITE:-west}"
 WEST_SOURCES=(
   "10.248.76.10"     # 10.248.76.0/25   — WestLinux's own lab NIC
   "10.248.76.138"    # 10.248.76.128/25
-  "10.248.77.10"     # 10.248.77.0/25
+  "10.248.77.138"    # 10.248.77.128/25
 )
 
 # EastLinux is not built yet; the native address is an assumption to confirm.

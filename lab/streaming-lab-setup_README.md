@@ -11,6 +11,7 @@ ACL matches on.
 | `dummy-interfaces.sh` | generator | Creates the customer source addresses |
 | `customer-streams.sh` | generator | Starts every subnet × every app port, stops them together |
 | `custLinux_setup.sh` | user host | Lab address, TCP listeners, status, capture |
+| `af31-marking-swan2.cfg` | router | The AF31 ingress marking policy this test exercises |
 | `qos-policy-1mb.cfg` | router | Example Cisco 1 Mbps shaper + queueing policy |
 
 Two Linux nodes:
@@ -32,7 +33,7 @@ The customer /25s in the ACL are split across two generators. Both scripts take
 |---|---|---|
 | `10.248.76.10` | 10.248.76.0/25 | WestLinux's own lab NIC — no dummy needed |
 | `10.248.76.138` | 10.248.76.128/25 | dummy0 |
-| `10.248.77.10` | 10.248.77.0/25 | dummy1 |
+| `10.248.77.138` | 10.248.77.128/25 | dummy1 |
 
 **east — EastLinux, not built yet**
 
@@ -94,7 +95,7 @@ null route covering those prefixes:
 
 ```
 ip route 10.248.76.138 255.255.255.255 10.248.76.10
-ip route 10.248.77.10  255.255.255.255 10.248.76.10
+ip route 10.248.77.138 255.255.255.255 10.248.76.10
 ```
 
 `10.248.76.10` is WestLinux's real address and should already be routable. When
@@ -140,7 +141,7 @@ Or capture either side of the perimeter router in Wireshark:
 Useful display filters:
 
 ```
-ip.src == 10.248.77.10 && tcp.srcport == 3389     # one specific stream
+ip.src == 10.248.77.138 && tcp.srcport == 3389    # one specific stream
 ip.dsfield.dscp != 0                              # everything the router marked
 ```
 

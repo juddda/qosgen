@@ -40,7 +40,7 @@ SITE="${SITE:-west}"
 # WestLinux holds 10.248.76.10 on ens4, so 10.248.76.0/25 needs no dummy.
 WEST_SOURCES=(
   "dummy0  10.248.76.138"    # 10.248.76.128/25
-  "dummy1  10.248.77.10"     # 10.248.77.0/25
+  "dummy1  10.248.77.138"    # 10.248.77.128/25
 )
 
 # EastLinux does not exist yet. The native address below is an assumption —

@@ -213,6 +213,7 @@ stream.md            stream reference
 SPEC.md              the specification both pipelines are built to
 lab/
   streaming-lab-setup_README.md  how to run a lab test with these scripts, in order
+  af31-marking-swan2.cfg  the AF31 ingress marking policy under test
   qos-policy-1mb.cfg  example Cisco hierarchical shaper + queueing policy
   customer-streams.sh launcher: every customer subnet × every application port (15)
   dummy-interfaces.sh create/remove the source addresses those streams bind
