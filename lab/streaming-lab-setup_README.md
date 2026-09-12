@@ -10,7 +10,8 @@ ACL matches on.
 |---|---|---|
 | `dummy-interfaces.sh` | generator | Creates the customer source addresses |
 | `customer-streams.sh` | generator | Starts every subnet × every app port, stops them together |
-| `custLinux_setup.sh` | user host | Lab address, TCP listeners, status, capture |
+| `custLinux_setup.sh` | user host | Lab address, listeners (TCP + UDP with DSCP), status, capture |
+| `demo-listeners.sh` | user host | netcat listeners for a customer demo — readable, but not for measured runs |
 | `af31-marking-swan2.cfg` | router | The AF31 ingress marking policy this test exercises |
 | `qos-policy-1mb.cfg` | router | Example Cisco 1 Mbps shaper + queueing policy |
 
