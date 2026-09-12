@@ -99,12 +99,18 @@ esac
 # One line per application: protocol, source port, destination port.
 # Distinct destination ports keep the five applications separable in a capture
 # even though every stream shares a source subnet with four others.
+#
+# Why 59xxx: the destination port stands in for a user's ephemeral client port,
+# so it should look like one and carry no meaning of its own. 6001-6005 used to
+# be used here and were a bad choice — /etc/services calls them x11-1..x11-5, so
+# Wireshark labelled RDP traffic "X11" in front of a customer. 59xxx is
+# unregistered, and avoids 60000-61000, which mosh uses.
 APPS=(
-  "tcp  3389  6001"    # RDP
-  "tcp   443  6002"    # HTTPS
-  "tcp  8443  6003"    # HTTPS-alt
-  "udp  3389  6004"    # RDP over UDP
-  "tcp    80  6005"    # HTTP
+  "tcp  3389  59001"    # RDP
+  "tcp   443  59002"    # HTTPS
+  "tcp  8443  59003"    # HTTPS-alt
+  "udp  3389  59004"    # RDP over UDP
+  "tcp    80  59005"    # HTTP
 )
 
 cd "$(dirname "$0")/.." || exit 1   # repo root, so qosgen.py resolves

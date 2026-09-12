@@ -15,7 +15,7 @@
 #        ./lab/custLinux_setup.sh capture     # tcpdump the arriving streams (needs sudo)
 #
 # Defaults match this lab: 10.10.10.10/24 via 10.10.10.1, listening on tcp
-# 6001-6003 and 6005, capturing traffic from 10.248.0.0/16. Override any of them:
+# 59001-59003 and 59005, capturing traffic from 10.248.0.0/16. Override any of them:
 #
 #   sudo ADDR=10.10.10.10 PREFIX=24 GATEWAY=10.10.10.1 IFACE=ens4 \
 #        ./lab/custLinux_setup.sh netplan
@@ -29,8 +29,8 @@ IFACE="${IFACE:-ens4}"                  # the lab-facing NIC, not the DHCP one
 ADDR="${ADDR:-10.10.10.10}"             # this host's address in the user subnet
 PREFIX="${PREFIX:-24}"                  # the user subnet's real prefix length
 GATEWAY="${GATEWAY:-10.10.10.1}"        # lab router on this segment
-TCP_PORTS="${TCP_PORTS:-6001 6002 6003 6005}"   # destination ports of the TCP streams
-UDP_PORTS="${UDP_PORTS:-6004}"             # destination port of the UDP stream
+TCP_PORTS="${TCP_PORTS:-59001 59002 59003 59005}"   # destination ports of the TCP streams
+UDP_PORTS="${UDP_PORTS:-59004}"             # destination port of the UDP stream
 SRC_FILTER="${SRC_FILTER:-10.248.0.0/16}"  # customer source subnets, for the capture
 NETPLAN_FILE="${NETPLAN_FILE:-/etc/netplan/60-ens4-lab.yaml}"
 PIDFILE="${PIDFILE:-/tmp/qosgen-listeners.pid}"
@@ -113,7 +113,7 @@ EOF
     # a demo, run it in the foreground instead, where the live table is the
     # point:
     #
-    #   python3 lab/listener.py --tcp 6001 6002 6003 6005 --udp 6004
+    #   python3 lab/listener.py --tcp 59001 59002 59003 59005 --udp 59004
     #
     : > "$PIDFILE"
     SETSID=""
@@ -155,7 +155,7 @@ EOF
     echo
     echo "== listeners =="
     if command -v ss > /dev/null 2>&1; then
-      ss -ltn 2>/dev/null | awk 'NR==1 || /:(6001|6002|6003|6005)\>/'
+      ss -ltn 2>/dev/null | awk 'NR==1 || /:(59001|59002|59003|59005)\>/'
     else
       echo "  ss not available"
     fi

@@ -5,13 +5,13 @@ The destination end of the lab. Accepts every TCP connection concurrently and
 binds the UDP ports with IP_RECVTOS, so the DSCP the router applied is visible
 without root and without tcpdump.
 
-    python3 lab/listener.py --tcp 6001 6002 6003 6005 --udp 6004
+    python3 lab/listener.py --tcp 59001 59002 59003 59005 --udp 59004
 
 Output is a line per new flow, then a summary table every few seconds and once
 more on exit:
 
-    22:31:04  NEW  tcp  10.248.76.10:3389    -> :6001   dscp 26 AF31
-    22:31:14  udp  10.248.76.10:3389    ->:6004  dscp 26 AF31   140 pkts
+    22:31:04  NEW  tcp  10.248.76.10:3389    -> :59001   dscp 26 AF31
+    22:31:14  udp  10.248.76.10:3389    ->:59004  dscp 26 AF31   140 pkts
 
 Why not netcat: netcat accepts one connection at a time per port and listens
 with a backlog of 1. Several customer subnets send to the same destination
@@ -277,15 +277,15 @@ def self_test():
         return hdr + sport.to_bytes(2, "big") + dport.to_bytes(2, "big")
 
     cases = [
-        ("AF31 TCP", ipv4(0x68, 6, "10.248.76.10", "10.10.10.10", 3389, 6001),
-         ("tcp", "10.248.76.10", 3389, 6001, 0x68)),
-        ("unmarked UDP", ipv4(0x00, 17, "10.248.77.138", "10.10.10.10", 3389, 6004),
-         ("udp", "10.248.77.138", 3389, 6004, 0x00)),
-        ("EF TCP", ipv4(0xB8, 6, "10.248.82.10", "10.10.10.10", 443, 6002),
-         ("tcp", "10.248.82.10", 443, 6002, 0xB8)),
+        ("AF31 TCP", ipv4(0x68, 6, "10.248.76.10", "10.10.10.10", 3389, 59001),
+         ("tcp", "10.248.76.10", 3389, 59001, 0x68)),
+        ("unmarked UDP", ipv4(0x00, 17, "10.248.77.138", "10.10.10.10", 3389, 59004),
+         ("udp", "10.248.77.138", 3389, 59004, 0x00)),
+        ("EF TCP", ipv4(0xB8, 6, "10.248.82.10", "10.10.10.10", 443, 59002),
+         ("tcp", "10.248.82.10", 443, 59002, 0xB8)),
         ("TCP with IP options", ipv4(0x68, 6, "10.248.76.138", "10.10.10.10",
-                                     8443, 6003, ihl_words=7),
-         ("tcp", "10.248.76.138", 8443, 6003, 0x68)),
+                                     8443, 59003, ihl_words=7),
+         ("tcp", "10.248.76.138", 8443, 59003, 0x68)),
         ("ICMP is ignored", ipv4(0x00, 1, "10.0.0.1", "10.0.0.2", 0, 0), None),
         ("truncated is ignored", b"\x45\x68", None),
     ]
@@ -304,9 +304,9 @@ def self_test():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--tcp", nargs="*", type=int, default=[6001, 6002, 6003, 6005],
+    ap.add_argument("--tcp", nargs="*", type=int, default=[59001, 59002, 59003, 59005],
                     help="TCP ports to accept on")
-    ap.add_argument("--udp", nargs="*", type=int, default=[6004],
+    ap.add_argument("--udp", nargs="*", type=int, default=[59004],
                     help="UDP ports to bind (these report DSCP reliably)")
     ap.add_argument("--summary-every", type=int, default=10, metavar="SECONDS",
                     help="seconds between summary tables, 0 to disable")

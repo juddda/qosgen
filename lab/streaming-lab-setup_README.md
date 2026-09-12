@@ -48,11 +48,11 @@ Three subnets × five application ports = **15 concurrent streams per site** —
 
 | Application | Protocol | Source port | Destination port |
 |---|---|---|---|
-| RDP | tcp | 3389 | 6001 |
-| HTTPS | tcp | 443 | 6002 |
-| HTTPS-alt | tcp | 8443 | 6003 |
-| RDP over UDP | udp | 3389 | 6004 |
-| HTTP | tcp | 80 | 6005 |
+| RDP | tcp | 3389 | 59001 |
+| HTTPS | tcp | 443 | 59002 |
+| HTTPS-alt | tcp | 8443 | 59003 |
+| RDP over UDP | udp | 3389 | 59004 |
+| HTTP | tcp | 80 | 59005 |
 
 ## Order of operations
 
@@ -61,7 +61,7 @@ Three subnets × five application ports = **15 concurrent streams per site** —
 ```bash
 cd ~/qosgen && git pull
 ./lab/custLinux_setup.sh status          # confirm 10.10.10.10 on ens4
-./lab/custLinux_setup.sh listeners       # accept TCP on 6001-6003 and 6005
+./lab/custLinux_setup.sh listeners       # accept TCP on 59001-59003 and 59005
 ```
 
 The listener is [`listener.py`](listener.py) rather than `nc`, because every source hits
@@ -72,15 +72,15 @@ of 1. Nothing needs installing — python3 is in every Ubuntu image. Output goes
 **For a demo, run it in the foreground** — the live table is the point:
 
 ```bash
-python3 lab/listener.py --tcp 6001 6002 6003 6005 --udp 6004
+python3 lab/listener.py --tcp 59001 59002 59003 59005 --udp 59004
 ```
 
 ```
-22:31:04  NEW  tcp  10.248.76.10:3389    -> :6001   dscp ?
-22:31:05  NEW  udp  10.248.76.10:3389    -> :6004   dscp 26 AF31
+22:31:04  NEW  tcp  10.248.76.10:3389    -> :59001   dscp ?
+22:31:05  NEW  udp  10.248.76.10:3389    -> :59004   dscp 26 AF31
 --- 22:31:14 ------------------------------------------------------
   proto source                   dport dscp        packets        bytes
-  udp   10.248.76.10:3389         6004 26 AF31           140      71,680
+  udp   10.248.76.10:3389         59004 26 AF31           140      71,680
 ```
 
 `dscp 26 AF31` on the UDP flows is the result the lab exists to produce: the generator
