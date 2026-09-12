@@ -23,6 +23,78 @@ Two Linux nodes:
 - **user — custLinux**, `10.10.10.10/24` on ens4. Stands in for the person using those
   applications, and receives the traffic.
 
+## Pre-flight checklist
+
+Work down it. Each line has a command and what a good answer looks like, so nothing is
+judged by eye. If a check fails, fix it before moving on — every one of them is a
+prerequisite for the next.
+
+**Nodes**
+
+- [ ] Both Linux nodes powered on in EVE-NG, and SSH reachable
+      `ssh paul@192.168.1.48` (WestLinux, generator) and `ssh paul@192.168.1.49` (custLinux, user)
+- [ ] **custLinux** has its lab address — `ip -br addr show ens4` → `10.10.10.10/24`
+- [ ] **WestLinux** has its lab address — `ip -br addr show ens4` → `10.248.76.10/25`
+- [ ] Both repos current — `cd ~/qosgen && git pull` on each
+- [ ] Exactly one default route on each, on the DHCP interface — `ip route | grep ^default`
+
+**Network**
+
+- [ ] WestLinux reaches its gateway — `ping -c2 10.248.76.1`
+- [ ] The gateway is the HSRP VIP, not a physical interface — `ip neigh show dev ens4`
+      → MAC begins `00:00:0c:07:ac` (HSRPv1) or `00:00:0c:9f:f` (v2)
+- [ ] End to end — `ping -c2 10.10.10.10` from WestLinux
+- [ ] Routers can return traffic to the dummy addresses — on the router,
+      `show ip route 10.248.76.138` → a `/32`, not `Null0`
+
+**Router policy**
+
+- [ ] Marking policy applied on the ingress interface —
+      `show policy-map interface GigabitEthernet0/5 input`
+- [ ] ACL matches **source** ports — `show ip access-lists AF31_SWAN2_MARKING`
+      → entries read `... eq 80 any`, **not** `... any eq 80`
+- [ ] Note the current hit counts, so you can tell new matches from old
+
+**Generator — WestLinux**
+
+- [ ] Dummy addresses exist — `sudo ./lab/dummy-interfaces.sh up` then
+      `./lab/dummy-interfaces.sh status` → every line `UP`, address `present`
+- [ ] No leftover streams from an earlier run — `pgrep -fc 'qosgen.py stream'` → `0`
+
+**Receiver — custLinux, and this one is the order that matters**
+
+- [ ] Listener started **before** any traffic —
+      `sudo python3 lab/listener.py --sniff --iface ens4 --summary-every 5`
+- [ ] All five ports bound — in another shell, `ss -ltun | grep -cE ':(5900[1-5]) '` → `5`
+- [ ] Optional, for the evidence pack: `sudo ./lab/custLinux_setup.sh capture` in a third
+      shell, writing a pcap
+
+**Run**
+
+- [ ] `sudo ./lab/customer-streams.sh` on WestLinux
+- [ ] Within ~5 seconds the listener shows **15 flows**, `markings seen: 26 AF31`
+- [ ] Router hit counts have moved — `show ip access-lists AF31_SWAN2_MARKING`
+
+**Afterwards**
+
+- [ ] Ctrl+C the streams, Ctrl+C the listener (it prints a final table)
+- [ ] `sudo ./lab/dummy-interfaces.sh down` if you're finished with the node
+
+### If something looks wrong
+
+| Symptom | Cause |
+|---|---|
+| TCP streams exit instantly, "nothing is listening" | Listener not running, or started after the streams |
+| Only UDP flows appear in the table | Same — the TCP streams died at launch and only UDP survived |
+| Flood of ICMP port-unreachable in a capture | UDP arriving with no listener bound; harmless, but start the listener first |
+| UDP fine, every TCP stream hangs | No `/32` return route — the SYN-ACK cannot get back |
+| `bind()` fails, "is not an address on this host" | Dummy interfaces not created, or removed by a reboot |
+| "not allowed to bind source port" | Ports 80 and 443 are privileged — run the launcher under `sudo` |
+| Everything arrives, but DSCP is 0 | Policy not applied to that interface, wrong direction, or the ACL matches destination ports |
+| TCP rows show `dscp ?` | Listener started without `--sniff`, or without root |
+| Wireshark labels traffic as some unrelated protocol | A destination port collides with a well-known one — see the `APPS` array |
+| Nothing at all, no errors | Wrong interface in `--iface`, or the node's link isn't drawn on the canvas |
+
 ## The stream matrix
 
 The customer /25s in the ACL are split across two generators. Both scripts take
