@@ -1,5 +1,7 @@
 # Running the lab
 
+Just the commands, nothing else: [quickstart_README.md](quickstart_README.md).
+
 Copy-paste, top to bottom. Two terminals: one on **custLinux** (10.10.10.10, the user),
 one on **WestLinux** (10.248.76.10, the generator). Order matters — the listener must be
 up before any traffic.

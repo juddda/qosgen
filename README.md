@@ -212,6 +212,7 @@ qos.md               qos reference
 stream.md            stream reference
 SPEC.md              the specification both pipelines are built to
 lab/
+  quickstart_README.md  the commands to start the lab, nothing else
   streaming-lab-setup_README.md  how to run a lab test with these scripts, in order
   af31-marking-swan2.cfg  the AF31 ingress marking policy under test
   qos-policy-1mb.cfg  example Cisco hierarchical shaper + queueing policy
