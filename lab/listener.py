@@ -132,11 +132,39 @@ class Flows:
         return "\n".join(out)
 
 
-def serve_tcp(port, flows):
+def bind_tcp(port):
+    """Bind and listen, or raise OSError. Called before any thread starts, so a
+    port clash is one clear message rather than a traceback per thread."""
     srv = socket.socket()
+    # SO_REUSEADDR lets us rebind promptly after a restart while old connections
+    # linger in TIME_WAIT. It does NOT allow a second live listener — two
+    # processes cannot both own a TCP port, which is what we want.
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("", port))
     srv.listen(128)          # every source connects at once; don't queue them
+    return srv
+
+
+def bind_udp(port):
+    """Bind, or raise OSError.
+
+    Deliberately no SO_REUSEADDR: on Linux it would let a second process bind
+    the same UDP port, and the kernel would then hand each datagram to one of
+    them. Counts would silently disagree with what was sent — far worse for a
+    measurement tool than refusing to start. UDP has no TIME_WAIT, so nothing
+    is lost by omitting it.
+    """
+    srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        srv.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
+        have_tos = True
+    except (AttributeError, OSError):
+        have_tos = False
+    srv.bind(("", port))
+    return srv, have_tos
+
+
+def serve_tcp(srv, port, flows):
     print(f"listening tcp/{port}", flush=True)
     while True:
         conn, addr = srv.accept()
@@ -171,15 +199,7 @@ def drain_tcp(conn, addr, port, flows):
         conn.close()
 
 
-def serve_udp(port, flows):
-    srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        srv.setsockopt(socket.IPPROTO_IP, socket.IP_RECVTOS, 1)
-        have_tos = True
-    except (AttributeError, OSError):
-        have_tos = False
-    srv.bind(("", port))
+def serve_udp(srv, port, flows, have_tos=False):
     print(f"listening udp/{port}" + ("" if have_tos else "  (no TOS support)"),
           flush=True)
     while True:
@@ -309,10 +329,33 @@ def main():
     print(f"qosgen listener — tcp {args.tcp}  udp {args.udp}")
     print("Ctrl+C to stop.\n", flush=True)
 
-    for p in args.tcp:
-        threading.Thread(target=serve_tcp, args=(p, flows), daemon=True).start()
-    for p in args.udp:
-        threading.Thread(target=serve_udp, args=(p, flows), daemon=True).start()
+    # Bind before serving, so a port already in use is one clear message.
+    bound = []          # (proto, port, socket, have_tos)
+    for proto, port in ([("tcp", p) for p in args.tcp] +
+                        [("udp", p) for p in args.udp]):
+        try:
+            if proto == "tcp":
+                bound.append((proto, port, bind_tcp(port), False))
+            else:
+                sock, have_tos = bind_udp(port)
+                bound.append((proto, port, sock, have_tos))
+        except OSError as exc:
+            for _pr, _po, sock, _t in bound:
+                sock.close()
+            print(f"\nerror: cannot bind {proto}/{port} — {exc}", file=sys.stderr)
+            print("       another listener is probably already running. Stop it "
+                  "with:\n         ./lab/custLinux_setup.sh stop\n"
+                  "       then start this one again.", file=sys.stderr)
+            return 1
+
+    for proto, port, sock, have_tos in bound:
+        if proto == "tcp":
+            threading.Thread(target=serve_tcp, args=(sock, port, flows),
+                             daemon=True).start()
+        else:
+            threading.Thread(target=serve_udp,
+                             args=(sock, port, flows, have_tos),
+                             daemon=True).start()
     if args.sniff:
         ports = set(args.tcp) | set(args.udp)
         threading.Thread(target=sniff, args=(flows, ports, args.iface),
