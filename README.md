@@ -218,7 +218,7 @@ lab/
   customer-streams.sh launcher: every customer subnet × every application port (15)
   dummy-interfaces.sh create/remove the source addresses those streams bind
   custLinux_setup.sh  prepare the user-end Linux host: lab address, listeners, capture
-  demo-listeners.sh   netcat listeners for a customer demo (see its header for limits)
+  listener.py         receives the streams, reports arriving DSCP (run it live for demos)
 requirements.txt     click
 LICENSE              MIT
 ```

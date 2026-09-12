@@ -11,7 +11,7 @@ ACL matches on.
 | `dummy-interfaces.sh` | generator | Creates the customer source addresses |
 | `customer-streams.sh` | generator | Starts every subnet × every app port, stops them together |
 | `custLinux_setup.sh` | user host | Lab address, listeners (TCP + UDP with DSCP), status, capture |
-| `demo-listeners.sh` | user host | netcat listeners for a customer demo — readable, but not for measured runs |
+| `listener.py` | user host | Receives the streams and reports the DSCP that arrived |
 | `af31-marking-swan2.cfg` | router | The AF31 ingress marking policy this test exercises |
 | `qos-policy-1mb.cfg` | router | Example Cisco 1 Mbps shaper + queueing policy |
 
@@ -64,10 +64,29 @@ cd ~/qosgen && git pull
 ./lab/custLinux_setup.sh listeners       # accept TCP on 6001-6003 and 6005
 ```
 
-The listener is a small python3 program rather than `nc`, because every source hits each
-destination port at once and netcat serves one connection at a time even with `-k`.
-Nothing needs installing — python3 is in every Ubuntu image. Connections are logged to
-`/tmp/qosgen-listeners.log`, so you can see exactly which sources arrived.
+The listener is [`listener.py`](listener.py) rather than `nc`, because every source hits
+each destination port at once and netcat serves one connection at a time with a backlog
+of 1. Nothing needs installing — python3 is in every Ubuntu image. Output goes to
+`/tmp/qosgen-listeners.log`.
+
+**For a demo, run it in the foreground** — the live table is the point:
+
+```bash
+python3 lab/listener.py --tcp 6001 6002 6003 6005 --udp 6004
+```
+
+```
+22:31:04  NEW  tcp  10.248.76.10:3389    -> :6001   dscp ?
+22:31:05  NEW  udp  10.248.76.10:3389    -> :6004   dscp 26 AF31
+--- 22:31:14 ------------------------------------------------------
+  proto source                   dport dscp        packets        bytes
+  udp   10.248.76.10:3389         6004 26 AF31           140      71,680
+```
+
+`dscp 26 AF31` on the UDP flows is the result the lab exists to produce: the generator
+sent DSCP 0, so the router applied that marking. **TCP shows `?`** — the kernel doesn't
+expose the TOS byte on stream sockets (measured on Ubuntu 24.04), so TCP marking has to
+come from the router's per-line ACL counters or a tcpdump capture.
 
 If the address ever needs (re)configuring:
 
