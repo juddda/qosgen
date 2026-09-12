@@ -1,122 +1,122 @@
-# lab/ — setting up and running the streaming test
+# Running the lab
 
-Everything here supports one test: traffic leaves the generator unmarked, crosses the
-perimeter router, and should come out the other side marked **AF31** (DSCP 26,
-`tos 0x68`). Direction is **application → user**, which is why the application ports
-(TCP 80, 443, 3389, 8443 and UDP 3389) are *source* ports — that is what the WAN QoS
-ACL matches on.
+Copy-paste, top to bottom. Two terminals: one on **custLinux** (10.10.10.10, the user),
+one on **WestLinux** (10.248.76.10, the generator). Order matters — the listener must be
+up before any traffic.
 
-| File | Runs on | Purpose |
-|---|---|---|
-| `dummy-interfaces.sh` | generator | Creates the customer source addresses |
-| `customer-streams.sh` | generator | Starts every subnet × every app port, stops them together |
-| `custLinux_setup.sh` | user host | Lab address, listeners (TCP + UDP with DSCP), status, capture |
-| `listener.py` | user host | Receives the streams and reports the DSCP that arrived |
-| `af31-marking-swan2.cfg` | router | The AF31 ingress marking policy this test exercises |
-| `qos-policy-1mb.cfg` | router | Example Cisco 1 Mbps shaper + queueing policy |
+## 1. custLinux — start the listener FIRST
 
-Two Linux nodes:
+```bash
+cd ~/qosgen && git pull
+sudo python3 lab/listener.py --sniff --iface ens4 --summary-every 5
+```
 
-- **generator — WestLinux**, `10.248.76.10/25` on ens4. Stands in for the customer's
-  application servers and sources the traffic for the west subnets. A second generator,
-  **EastLinux**, will do the same for the 10.248.8x subnets; it isn't built yet.
-- **user — custLinux**, `10.10.10.10/24` on ens4. Stands in for the person using those
-  applications, and receives the traffic.
+Expect five `listening …` lines and `sniffing IP headers on ens4`. Leave it running.
 
-## Pre-flight checklist
+## 2. WestLinux — source addresses, then traffic
 
-Work down it. Each line has a command and what a good answer looks like, so nothing is
-judged by eye. If a check fails, fix it before moving on — every one of them is a
-prerequisite for the next.
+```bash
+cd ~/qosgen && git pull
+sudo ./lab/dummy-interfaces.sh up
+sudo ./lab/customer-streams.sh
+```
 
-**Nodes**
+## 3. Watch the listener
 
-- [ ] Both Linux nodes powered on in EVE-NG, and SSH reachable
-      `ssh paul@192.168.1.48` (WestLinux, generator) and `ssh paul@192.168.1.49` (custLinux, user)
-- [ ] **custLinux** has its lab address — `ip -br addr show ens4` → `10.10.10.10/24`
-- [ ] **WestLinux** has its lab address — `ip -br addr show ens4` → `10.248.76.10/25`
-- [ ] Both repos current — `cd ~/qosgen && git pull` on each
-- [ ] Exactly one default route on each, on the DHCP interface — `ip route | grep ^default`
+Within five seconds:
 
-**Network**
+```
+--- 23:19:10 ------------------------------------------------------
+  proto source                   dport dscp        packets        bytes
+  tcp   10.248.76.10:3389        59001 26 AF31          46       23,552
+  ... 15 rows ...
+  15 flow(s), markings seen: 26 AF31
+```
 
-- [ ] WestLinux reaches its gateway — `ping -c2 10.248.76.1`
-- [ ] The gateway is the HSRP VIP, not a physical interface — `ip neigh show dev ens4`
-      → MAC begins `00:00:0c:07:ac` (HSRPv1) or `00:00:0c:9f:f` (v2)
-- [ ] End to end — `ping -c2 10.10.10.10` from WestLinux
-- [ ] Routers can return traffic to the dummy addresses — on the router,
-      `show ip route 10.248.76.138` → a `/32`, not `Null0`
+**`15 flow(s), markings seen: 26 AF31`** is the result. qosgen sends DSCP 0, so every
+marking was applied by the router.
 
-**Router policy**
+## 4. Stop
 
-- [ ] Marking policy applied on the ingress interface —
-      `show policy-map interface GigabitEthernet0/5 input`
-- [ ] ACL matches **source** ports — `show ip access-lists AF31_SWAN2_MARKING`
-      → entries read `... eq 80 any`, **not** `... any eq 80`
-- [ ] Note the current hit counts, so you can tell new matches from old
+Ctrl+C the streams, then Ctrl+C the listener (it prints a final table).
 
-**Generator — WestLinux**
+```bash
+sudo ./lab/dummy-interfaces.sh down      # WestLinux, when finished with the node
+```
 
-- [ ] Dummy addresses exist — `sudo ./lab/dummy-interfaces.sh up` then
-      `./lab/dummy-interfaces.sh status` → every line `UP`, address `present`
-- [ ] No leftover streams from an earlier run — `pgrep -fc 'qosgen.py stream'` → `0`
+---
 
-**Receiver — custLinux, and this one is the order that matters**
-
-- [ ] Listener started **before** any traffic —
-      `sudo python3 lab/listener.py --sniff --iface ens4 --summary-every 5`
-- [ ] All five ports bound — in another shell, `ss -ltun | grep -cE ':(5900[1-5]) '` → `5`
-- [ ] Optional, for the evidence pack: `sudo ./lab/custLinux_setup.sh capture` in a third
-      shell, writing a pcap
-
-**Run**
-
-- [ ] `sudo ./lab/customer-streams.sh` on WestLinux
-- [ ] Within ~5 seconds the listener shows **15 flows**, `markings seen: 26 AF31`
-- [ ] Router hit counts have moved — `show ip access-lists AF31_SWAN2_MARKING`
-
-**Afterwards**
-
-- [ ] Ctrl+C the streams, Ctrl+C the listener (it prints a final table)
-- [ ] `sudo ./lab/dummy-interfaces.sh down` if you're finished with the node
-
-### If something looks wrong
+# If it doesn't work
 
 | Symptom | Cause |
 |---|---|
 | TCP streams exit instantly, "nothing is listening" | Listener not running, or started after the streams |
-| Only UDP flows appear in the table | Same — the TCP streams died at launch and only UDP survived |
-| Flood of ICMP port-unreachable in a capture | UDP arriving with no listener bound; harmless, but start the listener first |
+| Only UDP flows in the table | Same — the TCP streams died at launch, only UDP survived |
+| Flood of ICMP port-unreachable in a capture | UDP arriving with no listener bound. Harmless; start the listener first |
 | UDP fine, every TCP stream hangs | No `/32` return route — the SYN-ACK cannot get back |
-| `bind()` fails, "is not an address on this host" | Dummy interfaces not created, or removed by a reboot |
+| `bind()` fails, "is not an address on this host" | Dummy interfaces missing; a reboot removes them |
 | "not allowed to bind source port" | Ports 80 and 443 are privileged — run the launcher under `sudo` |
-| Everything arrives, but DSCP is 0 | Policy not applied to that interface, wrong direction, or the ACL matches destination ports |
+| Everything arrives but DSCP is 0 | Policy on the wrong interface or direction, or the ACL matches destination ports |
 | TCP rows show `dscp ?` | Listener started without `--sniff`, or without root |
-| Wireshark labels traffic as some unrelated protocol | A destination port collides with a well-known one — see the `APPS` array |
-| Nothing at all, no errors | Wrong interface in `--iface`, or the node's link isn't drawn on the canvas |
+| Nothing at all, no errors | Wrong `--iface`, or the node's link isn't drawn on the EVE-NG canvas |
+
+## Checks, if you want to confirm before running
+
+```bash
+# custLinux
+ip -br addr show ens4                    # 10.10.10.10/24
+ss -ltun | grep -cE ':(5900[1-5]) '      # 5, once the listener is up
+
+# WestLinux
+ip -br addr show ens4                    # 10.248.76.10/25
+ip neigh show dev ens4                   # gateway MAC starts 00:00:0c:07:ac (HSRP VIP)
+ping -c2 10.10.10.10                     # end to end
+./lab/dummy-interfaces.sh status         # both dummies UP and present
+pgrep -fc 'qosgen.py stream'             # 0, no leftovers from an earlier run
+
+# router
+show ip route 10.248.76.138              # a /32, not Null0
+show ip access-lists AF31_SWAN2_MARKING  # entries read "eq 80 any", NOT "any eq 80"
+show policy-map interface GigabitEthernet0/5 input
+```
+
+Note the ACL hit counts before you start, so new matches are distinguishable from old.
+
+---
+
+# Reference
+
+## The files
+
+| File | Runs on | Purpose |
+|---|---|---|
+| `listener.py` | custLinux | Receives the streams, reports the DSCP that arrived |
+| `custLinux_setup.sh` | custLinux | Lab address, detached listener, status, pcap capture |
+| `dummy-interfaces.sh` | WestLinux | Creates the customer source addresses |
+| `customer-streams.sh` | WestLinux | Every subnet × every application port |
+| `af31-marking-swan2.cfg` | router | The AF31 ingress marking policy under test |
+| `qos-policy-1mb.cfg` | router | Example 1 Mbps shaper + queueing policy |
 
 ## The stream matrix
 
-The customer /25s in the ACL are split across two generators. Both scripts take
-`SITE=west` (the default) or `SITE=east`:
+Direction is **application → user**, so the application ports are *source* ports — which
+is what the WAN QoS ACL matches on.
 
-**west — WestLinux**
+**west — WestLinux** (`SITE=west`, the default)
 
-| Source address | Subnet | Note |
+| Source address | Subnet | |
 |---|---|---|
 | `10.248.76.10` | 10.248.76.0/25 | WestLinux's own lab NIC — no dummy needed |
 | `10.248.76.138` | 10.248.76.128/25 | dummy0 |
 | `10.248.77.138` | 10.248.77.128/25 | dummy1 |
 
-**east — EastLinux, not built yet**
+**east — EastLinux** (`SITE=east`, node not built yet)
 
-| Source address | Subnet | Note |
+| Source address | Subnet | |
 |---|---|---|
-| `10.248.82.10` | 10.248.82.0/25 | assumed to be EastLinux's own lab NIC — confirm when built |
+| `10.248.82.10` | 10.248.82.0/25 | assumed to be its own lab NIC — confirm when built |
 | `10.248.82.138` | 10.248.82.128/25 | dummy0 |
 | `10.248.83.138` | 10.248.83.128/25 | dummy1 |
-
-Three subnets × five application ports = **15 concurrent streams per site** — 12 TCP and 3 UDP.
 
 | Application | Protocol | Source port | Destination port |
 |---|---|---|---|
@@ -126,143 +126,55 @@ Three subnets × five application ports = **15 concurrent streams per site** —
 | RDP over UDP | udp | 3389 | 59004 |
 | HTTP | tcp | 80 | 59005 |
 
-## Order of operations
+Three subnets × five applications = **15 concurrent streams per site**, covering that
+site's ACL lines in one run.
 
-### 1. User host — custLinux
+## Router prerequisites
 
-```bash
-cd ~/qosgen && git pull
-./lab/custLinux_setup.sh status          # confirm 10.10.10.10 on ens4
-./lab/custLinux_setup.sh listeners       # accept TCP on 59001-59003 and 59005
-```
-
-The listener is [`listener.py`](listener.py) rather than `nc`, because every source hits
-each destination port at once and netcat serves one connection at a time with a backlog
-of 1. Nothing needs installing — python3 is in every Ubuntu image. Output goes to
-`/tmp/qosgen-listeners.log`.
-
-**For a demo, run it in the foreground** — the live table is the point:
-
-```bash
-python3 lab/listener.py --tcp 59001 59002 59003 59005 --udp 59004
-```
-
-```
-22:31:04  NEW  tcp  10.248.76.10:3389    -> :59001   dscp ?
-22:31:05  NEW  udp  10.248.76.10:3389    -> :59004   dscp 26 AF31
---- 22:31:14 ------------------------------------------------------
-  proto source                   dport dscp        packets        bytes
-  udp   10.248.76.10:3389         59004 26 AF31           140      71,680
-```
-
-`dscp 26 AF31` on the UDP flows is the result the lab exists to produce: the generator
-sent DSCP 0, so the router applied that marking. **TCP shows `?`** — the kernel doesn't
-expose the TOS byte on stream sockets (measured on Ubuntu 24.04), so TCP marking has to
-come from the router's per-line ACL counters or a tcpdump capture.
-
-If the address ever needs (re)configuring:
-
-```bash
-sudo ./lab/custLinux_setup.sh netplan    # defaults to 10.10.10.10/24 via 10.10.10.1
-```
-
-### 2. Generator — WestLinux
-
-```bash
-cd ~/qosgen && git pull
-sudo ./lab/dummy-interfaces.sh up
-./lab/dummy-interfaces.sh status
-```
-
-The dummy addresses exist because `bind()` only accepts addresses the kernel owns, and
-those customer subnets aren't on this node. WestLinux needs two; its third subnet is the
-one its own lab NIC sits in. `/32` each — the mask never appears in
-the packet, so a `/32` matches a `/25` ACL entry identically, while a `/25` would
-blackhole the whole block locally.
-
-### 3. Routers
-
-A host route per source address, pointing back at the generator, more specific than any
-null route covering those prefixes:
+A host route per dummy address, more specific than any null route covering the block —
+without these, UDP flows and every TCP stream hangs at the handshake:
 
 ```
 ip route 10.248.76.138 255.255.255.255 10.248.76.10
 ip route 10.248.77.138 255.255.255.255 10.248.76.10
 ```
 
-`10.248.76.10` is WestLinux's real address and should already be routable. When
-EastLinux exists, it needs the same for `10.248.82.138` and `10.248.83.138`.
+`10.248.76.10` is WestLinux's real address and should already be routable. EastLinux
+will need the same for `10.248.82.138` and `10.248.83.138`.
 
-Without these, the user's TCP ACKs have nowhere to go and the 12 TCP streams never get
-past the handshake. The 3 UDP streams flow regardless — a useful way to tell a routing
-problem from a marking problem.
+## Evidence for a customer
 
-### 4. Run it
+Three independent views. Three agreeing is proof; one is an assertion.
 
-On the generator:
+1. **The listener table** — 15 flows, `markings seen: 26 AF31`
+2. **A pcap** — `sudo ./lab/custLinux_setup.sh capture`, then `ip.dsfield.dscp == 26`
+   in Wireshark. The forward direction is marked; the ACKs coming back are DSCP 0,
+   which is correct — the policy only classifies the application → user direction
+3. **Router counters** — `show ip access-lists AF31_SWAN2_MARKING`, per-line hits.
+   The east lines stay at zero until EastLinux exists, which is a useful control
 
-```bash
-sudo ./lab/customer-streams.sh                    # west, 15 streams, 10 pps each
-sudo PPS=50 ./lab/customer-streams.sh             # heavier
-sudo SITE=east ./lab/customer-streams.sh          # once EastLinux exists
-```
-
-`sudo` because source ports 80 and 443 are privileged, and because a mixed root/non-root
-process group can't be stopped by one Ctrl+C — an unprivileged shell isn't allowed to
-signal a root process. Ctrl+C stops all 15.
-
-Each stream prints its own packet count on exit, so a combination that isn't matching
-stands out as an outlier.
-
-### 5. Watch it
-
-On the user host:
+## Other options
 
 ```bash
-sudo ./lab/custLinux_setup.sh capture      # tcpdump from 10.248.0.0/16, expect tos 0x68
-tail -f /tmp/qosgen-listeners.log          # which sources actually connected
-```
-
-Or capture either side of the perimeter router in Wireshark:
-
-| Capture point | Filter | Expected |
-|---|---|---|
-| Generator side (LAN) | `ip.dsfield.dscp == 0` | unmarked, as sent |
-| WAN side | `ip.dsfield.dscp == 26` | AF31, applied by the router |
-
-Useful display filters:
-
-```
-ip.src == 10.248.77.138 && tcp.srcport == 3389    # one specific stream
-ip.dsfield.dscp != 0                              # everything the router marked
-```
-
-On the router: `show policy-map interface <interface>`.
-
-## Teardown
-
-```bash
-# generator
-sudo ./lab/dummy-interfaces.sh down
-
-# user host
-./lab/custLinux_setup.sh stop
+sudo PPS=50 ./lab/customer-streams.sh          # heavier, 50 pps per stream
+sudo SITE=east ./lab/customer-streams.sh       # once EastLinux exists
+./lab/custLinux_setup.sh listeners             # detached listener, no live table
+python3 lab/listener.py --self-test            # prove the header parsing, no privilege
 ```
 
 ## After an EVE-NG node wipe
 
-A wipe resets the node to its base image, so the repo, the netplan file, and any
-installed packages are gone. Dummy interfaces and `sysctl` settings don't survive a
-plain reboot either — neither is persisted. Re-run the steps above; that is most of the
-reason these are scripts rather than notes.
+A wipe resets the node to its base image: repo, netplan file and installed packages all
+gone. Dummy interfaces don't survive a plain reboot either. Re-clone, re-run
+`custLinux_setup.sh netplan`, and work down this page again.
 
-Also worth knowing: add both NICs **before** first boot. Inserting an interface into a
-running, configured node can reshuffle which topology link lands on which NIC, and the
-symptom — carrier up, config valid, no DHCP — takes a while to pin down.
+Add both NICs **before** a node's first boot. Inserting an interface into a running,
+configured node can reshuffle which topology link lands on which NIC, and the symptom —
+carrier up, config valid, no DHCP — takes a long time to pin down.
 
 ## More detail
 
 - [../stream.md](../stream.md) — the `stream` pipeline: every flag, sourcing from
-  addresses the host doesn't own, running several streams at once
+  addresses the host doesn't own, why the order of operations is what it is
 - [../qos.md](../qos.md) — the `qos` pipeline: marked voice, signaling and noise
 - [../README.md](../README.md) — install, troubleshooting, DSCP reference
